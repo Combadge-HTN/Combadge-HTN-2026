@@ -176,6 +176,7 @@ The client uses the GPT-Live WebSocket protocol with Responses delegation. `--ca
 
 ## Documentation
 
+- [MPR121 touch input](docs/HARDWARE.md#mpr121-touch-sensor): reusable `commbadge.touch` driver and continuous-state hardware check.
 - [QNX integration](docs/QNX.md): runtime and audio interface.
 - [Hardware](docs/HARDWARE.md): components and electrical requirements.
 - [Project plan](PROJECT_PLAN.md): architecture and upcoming features.
