@@ -51,6 +51,17 @@ def main(argv: list[str] | None = None) -> int:
         help="session limit after startup (default: 300; check: 15; image check: 45)",
     )
     voice.add_argument("--no-captions", action="store_true", help="hide transcript output")
+    voice.add_argument(
+        "--speaker",
+        action="append",
+        default=[],
+        metavar="NAME=FILE.wav",
+        help="enroll a speaker using a 2–10s WAV; repeat for up to four people",
+    )
+    analyze = commands.add_parser("speakers", help="analyze a WAV with enrolled speaker references")
+    analyze.add_argument("audio", type=Path, help="mono PCM16 24kHz WAV, up to 30 seconds")
+    analyze.add_argument("--speaker", action="append", required=True, metavar="NAME=FILE.wav")
+    analyze.add_argument("--env-file", type=Path, default=Path(".env"))
     voice.add_argument("--image", type=Path, help="send a JPEG, PNG, or WebP to the vision backend")
     voice.add_argument("--question", help="question about --image (default: describe the image)")
     snapshots = voice.add_mutually_exclusive_group()
@@ -103,6 +114,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command in ("call", "phone-relay"):
         return run_phone(args, parser)
+    speaker_tracker = None
+    if args.command in ("voice", "speakers") and args.speaker:
+        if args.command == "voice" and (args.check or args.list_devices):
+            parser.error("--speaker requires a voice session")
+        from commbadge.speakers import SpeakerTracker, Transcriber, load_references, read_wav
+
+        try:
+            references = load_references(args.speaker)
+            import httpx  # noqa: F401
+        except ImportError:
+            parser.exit(1, "Speaker dependencies are missing. Install the speakers extra.\n")
+        except (OSError, ValueError) as error:
+            parser.error(f"Cannot load speaker references: {error}")
     phone_settings = None
     if args.command == "voice" and args.calls:
         if args.check or args.list_devices:
@@ -194,6 +218,36 @@ def main(argv: list[str] | None = None) -> int:
     except OSError:
         parser.exit(1, "Could not read the selected environment file. Check its permissions.\n")
 
+    if args.command in ("voice", "speakers") and args.speaker:
+        if not settings.openai_api_key:
+            parser.exit(1, "Add OPENAI_API_KEY before using speaker identification.\n")
+        transcriber = Transcriber(settings.openai_api_key, references)
+        speaker_tracker = SpeakerTracker(transcriber)
+        if args.command == "speakers":
+            import time
+            from dataclasses import asdict
+
+            try:
+                pcm = read_wav(args.audio, minimum=0.1, maximum=30)
+                started = time.monotonic()
+                segments = asyncio.run(transcriber.analyze(pcm))
+                print(
+                    json.dumps(
+                        {
+                            "analysis_seconds": round(time.monotonic() - started, 3),
+                            "segments": [asdict(s) for s in segments],
+                        },
+                        indent=2,
+                    )
+                )
+                return 0
+            except KeyboardInterrupt:
+                return 130
+            except Exception:
+                parser.exit(
+                    1, "Speaker analysis failed; check WAV format, API access and connection.\n"
+                )
+
     if args.command == "shop" or (args.command == "voice" and args.shopify):
         try:
             account = None
@@ -247,6 +301,7 @@ def main(argv: list[str] | None = None) -> int:
                     snapshot_capture=snapshot_capture,
                     phone_settings=phone_settings,
                     shopping=shopping,
+                    speaker_tracker=speaker_tracker,
                     playback_command=shlex.split(args.playback_command)
                     if args.playback_command
                     else None,

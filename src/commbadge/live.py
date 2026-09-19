@@ -15,6 +15,8 @@ from commbadge.capture import SnapshotCapture
 from commbadge.config import Settings
 from commbadge.delegation import SNAPSHOT_TOOL, SnapshotDelegation
 from commbadge.shopify import SHOP_ACCOUNT_TOOLS, SHOPPING_TOOLS, ShoppingSession
+from commbadge.speakers import INSTRUCTIONS as SPEAKER_INSTRUCTIONS
+from commbadge.speakers import SpeakerTracker
 from commbadge.vision import ImageInput
 
 Report = Callable[[str], None]
@@ -75,10 +77,12 @@ def session_config(
     call_names: list[str] | None = None,
     shopping: bool = False,
     shop_account: bool = False,
+    speakers: bool = False,
 ) -> dict:
     config = {
         "model": settings.live_model,
         "instructions": PROMPT
+        + (SPEAKER_INSTRUCTIONS if speakers else "")
         + (
             " The application is submitting a still image and question to your backend. "
             "The initial question is already being processed; do not start another delegation. "
@@ -274,6 +278,7 @@ async def run_session(
     snapshot_capture: SnapshotCapture | None = None,
     phone_settings=None,
     shopping: ShoppingSession | None = None,
+    speaker_tracker: SpeakerTracker | None = None,
 ) -> LiveStats:
     """Run a connected session; injectable audio/connection enable hardware-free tests."""
     stats = LiveStats()
@@ -337,6 +342,8 @@ async def run_session(
                 }
             )
             stats.sent_bytes += len(data)
+            if speaker_tracker is not None:
+                speaker_tracker.feed(data)
 
     async def play_audio() -> None:
         while True:
@@ -346,6 +353,8 @@ async def run_session(
         nonlocal last_speaker, image_delegation, image_response, image_speech_bytes
         while True:
             event = await connection.recv()
+            if speaker_tracker is not None and speaker_tracker.observe(event):
+                continue
             check_error(event)
             if snapshots is not None and event.type == "response.event":
                 snapshots.observe(event)
@@ -431,6 +440,7 @@ async def run_session(
                         call_names=call_names,
                         shopping=shopping is not None,
                         shop_account=getattr(shopping, "account", None) is not None,
+                        speakers=speaker_tracker is not None,
                     ),
                 }
             )
@@ -479,6 +489,10 @@ async def run_session(
             asyncio.create_task(stop.wait()),
             asyncio.create_task(asyncio.sleep(seconds)),
         ]
+        if speaker_tracker is not None:
+            tasks.append(
+                asyncio.create_task(speaker_tracker.run(connection, report, captions=captions))
+            )
         if snapshots is not None:
             tasks.append(asyncio.create_task(snapshots.run()))
         if phone_settings is not None:
@@ -543,6 +557,7 @@ async def connect_voice(
     snapshot_capture: SnapshotCapture | None = None,
     phone_settings=None,
     shopping: ShoppingSession | None = None,
+    speaker_tracker: SpeakerTracker | None = None,
 ) -> LiveStats:
     # Lazy import keeps the base package usable without the voice extra.
     from websockets.asyncio.client import connect
@@ -587,6 +602,7 @@ async def connect_voice(
                 snapshot_capture=snapshot_capture,
                 phone_settings=phone_settings,
                 shopping=shopping,
+                speaker_tracker=speaker_tracker,
             )
         # Both session.closed and the WebSocket close precede any telephone audio.
         if stats.phone_contact is not None and not stop.is_set():

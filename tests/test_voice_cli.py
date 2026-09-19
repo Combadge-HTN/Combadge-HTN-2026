@@ -65,3 +65,41 @@ def test_invalid_snapshot_options_fail_before_connecting(args):
         main(["voice", *args])
     assert error.value.code == 2
     connect.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", ["--check", "--list-devices"])
+def test_speaker_options_require_voice(mode):
+    with patch("commbadge.live.connect_voice") as connect, pytest.raises(SystemExit) as error:
+        main(["voice", "--speaker", "Edmon=missing.wav", mode])
+    assert error.value.code == 2
+    connect.assert_not_called()
+
+
+def test_speaker_references_are_passed_to_voice(tmp_path):
+    from commbadge.speakers import pcm_wav
+
+    path = tmp_path / "edmon.wav"
+    path.write_bytes(pcm_wav(b"\x01\x00" * 24000 * 4))
+    env = tmp_path / ".env"
+    env.write_text("OPENAI_API_KEY=test-key\n")
+    with patch("commbadge.live.connect_voice") as connect:
+        assert main(["voice", "--env-file", str(env), "--speaker", f"Edmon={path}"]) == 0
+    tracker = connect.call_args.kwargs["speaker_tracker"]
+    assert tracker.transcriber.references[0].name == "Edmon"
+
+
+def test_speaker_analysis_command_prints_segments_without_transcript(tmp_path, capsys):
+    from commbadge.speakers import Segment, pcm_wav
+
+    path = tmp_path / "edmon.wav"
+    path.write_bytes(pcm_wav(b"\x01\x00" * 24000 * 4))
+    env = tmp_path / ".env"
+    env.write_text("OPENAI_API_KEY=test-key\n")
+    with patch("commbadge.speakers.Transcriber.analyze", return_value=[Segment(0, 4, "Edmon")]):
+        assert (
+            main(["speakers", str(path), "--env-file", str(env), "--speaker", f"Edmon={path}"]) == 0
+        )
+    output = capsys.readouterr().out
+    assert "Edmon" in output
+    assert "analysis_seconds" in output
+    assert "test-key" not in output

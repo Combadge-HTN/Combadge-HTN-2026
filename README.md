@@ -42,6 +42,10 @@ Press **Ctrl+C** to end the session. Sessions default to five minutes; use `--ma
 
 `commbadge doctor` reports configuration and audio utility availability. `commbadge voice --check` verifies API access and generated audio without opening audio devices; it consumes API credits.
 
+## Speaker identification (prototype)
+
+Add `--speaker Edmon=/path/to/edmon.wav --speaker Samuel=/path/to/samuel.wav` to identify enrolled voices alongside the live conversation. Install the optional speaker dependencies first. Labels arrive asynchronously and can be wrong; overlapping speech remains experimental. See [speaker setup and limitations](docs/SPEAKERS.md).
+
 ## Image questions
 
 Add a still image and question to the voice command:
