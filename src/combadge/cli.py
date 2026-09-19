@@ -12,6 +12,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 from combadge.capture import COSMIC_SCREENSHOT, SnapshotCapture, qnx_camera_capture
+from combadge.compat import configure_asyncio
 from combadge.config import load_settings
 from combadge.shop_account import DEFAULT_AUTH_FILE, ShopAccount, TokenStore
 from combadge.shopify import CatalogClient, ShoppingSession
@@ -26,9 +27,16 @@ def positive_seconds(value: str) -> float:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_asyncio()
     parser = argparse.ArgumentParser(prog="combadge", description=__doc__)
     parser.add_argument("--version", action="version", version=version("htn-combadge"))
     commands = parser.add_subparsers(dest="command", required=True)
+    from combadge.startup import add_arguments as start_arguments
+
+    start = commands.add_parser(
+        "start", help="start microphone and camera with replies in the console"
+    )
+    start_arguments(start)
     doctor = commands.add_parser("doctor", help="show configuration and audio tool availability")
     doctor.add_argument("--env-file", type=Path, default=Path(".env"))
     voice = commands.add_parser("voice", help="stream speech with GPT-Live")
@@ -41,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     voice.add_argument("--input-device", default="default", help="ALSA capture device")
     voice.add_argument("--output-device", default="default", help="ALSA playback device")
-    voice.add_argument("--audio-backend", choices=("alsa", "commands"), default="alsa")
+    voice.add_argument("--audio-backend", choices=("alsa", "commands", "console"), default="alsa")
     voice.add_argument("--capture-command", help="raw PCM capture helper command (no shell)")
     voice.add_argument("--playback-command", help="raw PCM playback helper command (no shell)")
     voice.add_argument(
@@ -118,6 +126,10 @@ def main(argv: list[str] | None = None) -> int:
     shop.add_argument("--env-file", type=Path, default=Path(".env"))
     shop.add_argument("--max-price", type=int, help="maximum item price in cents (CAD by default)")
     args = parser.parse_args(argv)
+    if args.command == "start":
+        from combadge.startup import launch
+
+        return launch(args)
     if args.command in ("call", "phone-relay"):
         return run_phone(args, parser)
     speaker_tracker = None
@@ -308,6 +320,7 @@ def main(argv: list[str] | None = None) -> int:
                     output_device=args.output_device,
                     seconds=args.max_seconds or ((45 if image else 15) if args.check else 300),
                     captions=not args.no_captions,
+                    console=args.audio_backend == "console",
                     capture_command=shlex.split(args.capture_command)
                     if args.capture_command
                     else None,

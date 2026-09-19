@@ -30,6 +30,36 @@ Runtime dependencies are pinned in `requirements-voice.txt`, exported from `uv.l
 
 ## Voice
 
+For microphone input, physical camera snapshots, and replies printed in the
+console, run on the Pi:
+
+```sh
+combadge start
+```
+
+This does not open a playback device or require Bluetooth. It uses the checkout's
+`.env` from any working directory. Say **“Computer, look at this”** to capture a
+camera image. Press **Ctrl+C** to stop. The default session limit is one hour;
+use `combadge start --max-seconds 180` for a short test, or `--no-camera` for
+microphone-only use. GPT-Live still generates audio server-side; this mode
+discards playback and displays the transcripts, and still uses API credits.
+
+The prepared Pi has `~/bin/combadge` linked to this checkout's `.venv/bin/combadge`.
+On a new checkout, activate `.venv` first or run `.venv/bin/combadge start`.
+
+For speaker output through Dan's existing Bluetooth example, turn on the TWS
+Mini Speaker, disconnect it from other devices, and run:
+
+```sh
+combadge start --bluetooth
+```
+
+This starts `~/projects/qnx-bluetooth/run-radio.sh`, connects the speaker, and
+feeds this app's converted audio through the example's `audio.pcm` FIFO. It does
+not change the Pi's system audio output. Ctrl+C stops the app and Bluetooth
+session. `combadge start --tone` runs the example's three-second PCM tone test
+without using the API. See [Bluetooth startup](docs/QNX.md#bluetooth-example).
+
 With a microphone and speaker connected to the QNX audio device:
 
 ```sh

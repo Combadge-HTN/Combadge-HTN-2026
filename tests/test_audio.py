@@ -4,6 +4,35 @@ import sys
 from combadge.audio import FRAME_BYTES, CommandAudio
 
 
+def test_console_capture_needs_no_playback_process():
+    async def scenario():
+        audio = CommandAudio(
+            [sys.executable, "-c", "import os,time; os.write(1, bytes(960)); time.sleep(20)"],
+            None,
+        )
+        try:
+            await audio.start()
+            assert audio.player is None
+            assert await asyncio.wait_for(audio.read(), 3) == bytes(FRAME_BYTES)
+            await audio.write(b"\x01\x00" * 480)
+        finally:
+            await audio.close()
+        assert audio.recorder.returncode is not None
+
+    asyncio.run(scenario())
+
+
+def test_console_preflight_does_not_require_aplay(monkeypatch):
+    from combadge.audio import AlsaAudio
+
+    monkeypatch.setattr(
+        "combadge.audio.shutil.which", lambda name: "/bin/arecord" if name == "arecord" else None
+    )
+    audio = AlsaAudio(playback=False)
+    audio.preflight()
+    assert audio.playback_command is None
+
+
 def test_native_helper_contract_handles_partial_reads_and_stops_processes(tmp_path):
     async def scenario():
         capture = tmp_path / "capture.py"

@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 from combadge.audio import FRAME_BYTES, RATE, AlsaAudio, AudioIO, CommandAudio, SilenceAudio
 from combadge.capture import SnapshotCapture
+from combadge.compat import configure_asyncio
 from combadge.config import Settings
 from combadge.delegation import SNAPSHOT_TOOL, SnapshotDelegation
 from combadge.shopify import SHOP_ACCOUNT_TOOLS, SHOPPING_TOOLS, ShoppingSession
@@ -570,6 +571,7 @@ async def connect_voice(
     captions: bool,
     capture_command: list[str] | None = None,
     playback_command: list[str] | None = None,
+    console: bool = False,
     image: ImageInput | None = None,
     snapshot_capture: SnapshotCapture | None = None,
     phone_settings=None,
@@ -577,6 +579,7 @@ async def connect_voice(
     speaker_tracker: SpeakerTracker | None = None,
 ) -> LiveStats:
     # Lazy import keeps the base package usable without the voice extra.
+    configure_asyncio()
     from websockets.asyncio.client import connect
 
     if snapshot_capture is not None:
@@ -589,7 +592,11 @@ async def connect_voice(
         audio = CommandAudio(capture_command, playback_command)
         audio.preflight()
     else:
-        audio = AlsaAudio(input_device, output_device)
+        audio = (
+            AlsaAudio(input_device, output_device, playback=False)
+            if console
+            else AlsaAudio(input_device, output_device)
+        )
         audio.preflight()
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

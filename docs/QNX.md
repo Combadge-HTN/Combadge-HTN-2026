@@ -10,9 +10,20 @@ The application requires Python 3.14, TLS certificates, DNS, outbound secure Web
 
 The session layer uses the [GPT-Live WebSocket protocol](https://developers.openai.com/api/docs/guides/voice-websockets?api=live) directly. The QNX runtime has been exercised with prerecorded PCM: session connection, generated audio reception, camera tool calls, speaker analysis, and catalog search. Physical USB microphone input has also been exercised in a live session with transcription and generated responses. Audible speaker playback remains unvalidated.
 
-Speaker identification uses standard-library HTTPS in a background thread; see [speaker setup](SPEAKERS.md). It does not modify QNX or Python runtime internals.
+Speaker identification uses standard-library HTTPS in a background thread; see [speaker setup](SPEAKERS.md).
+
+The installed QNX Python 3.14 reports `SC_IOV_MAX=-1`, which breaks asyncio's
+buffered `sendmsg` path during larger TLS writes, including camera uploads.
+The application applies a guarded, process-local fallback of one buffer per
+`sendmsg` call when this limit is invalid on QNX. Valid limits and other platforms
+are unchanged; no system Python files are edited.
 
 ## Audio interface
+
+For the microphone/camera test without speakers, use `combadge start`. It enables
+physical camera snapshots and prints GPT-Live transcripts in the console. Only
+`arecord` is started; `aplay` and the Bluetooth launcher are not needed. The
+underlying command is `combadge voice --camera --audio-backend console`.
 
 Dan has written the Bluetooth and audio drivers, and speakers are available. See [Combadge-HTN/qnx-bluetooth](https://github.com/Combadge-HTN/qnx-bluetooth) for the Bluetooth work. Validate audible playback with the selected speakers using the native audio adapter below.
 
@@ -31,6 +42,33 @@ Dan has written the Bluetooth and audio drivers, and speakers are available. See
 The client reads 960-byte frames (20 ms). Helpers may emit partial frames; input EOF is treated as a device failure. Playback buffering is bounded, and stalled output closes the session. Resample in the helper when hardware uses another sample rate.
 
 Check `arecord --help`, `aplay --help`, and `combadge voice --list-devices` on the target. The supplied QNX USB audio image supports raw 24 kHz mono PCM through these tools. Run `combadge voice` with the default backend. If these tools are absent, custom capture/playback helpers must use the selected audio interface's QNX driver. The presence of `wave` and `waverec` alone does not provide this raw streaming interface: their documented inputs and outputs are WAV files. Consult `use wave` and `use waverec` for the installed utilities' options.
+
+## Bluetooth example
+
+`combadge start --bluetooth` uses Dan's existing example in the sibling
+`qnx-bluetooth` checkout. It starts the guarded `run-radio.sh`, scans for the TWS
+Mini Speaker, selects 44.1 kHz if the speaker reconnects at 48 kHz, opens the PCM
+FIFO, and starts microphone/camera input with speaker output. The speaker stays
+connected for this application session. This does not register a system audio
+device or reroute unrelated applications.
+
+The startup command requires the driver's built executable, firmware,
+`play_pcm.py`, and existing `audio.pcm` FIFO. Use `--bluetooth-dir PATH` for a
+different driver location. The Pi needs `sudo`, `cc`, and `gpio-bcm`. Only the
+Bluetooth supervisor runs as root; the application runs as the invoking user.
+The supervisor preserves the driver's ownership checks and prepares the
+Bluetooth UART FIFO only on a verified idle controller. Ctrl+C stops the
+application, stops the example, and restores any FIFO initialization it made.
+
+The playback helper converts 24 kHz mono to 44.1 kHz stereo with continuous
+resampling state and uses the driver's bounded FIFO writer. The example's
+existing 1/32 volume attenuation remains in effect. Its Python PCM path can be
+tested with `combadge start --tone`. Audible live speech still needs human
+confirmation; successful connection and PCM submission alone do not prove it.
+
+On the prepared Pi, `~/bin/combadge` points to the checkout's `.venv/bin/combadge`,
+so startup works from any directory. On another Pi, activate the virtual
+environment first or run `.venv/bin/combadge start --bluetooth` from the checkout.
 
 ## Camera capture
 

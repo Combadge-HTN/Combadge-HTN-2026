@@ -41,7 +41,7 @@ class CommandAudio:
     Blocking operations run in threads; terminating helpers releases pending I/O.
     """
 
-    def __init__(self, capture_command: list[str], playback_command: list[str]):
+    def __init__(self, capture_command: list[str], playback_command: list[str] | None):
         self.capture_command = capture_command
         self.playback_command = playback_command
         self.recorder: subprocess.Popen | None = None
@@ -50,7 +50,10 @@ class CommandAudio:
         self._log_tasks: list[asyncio.Task] = []
 
     def preflight(self) -> None:
-        for command in (self.capture_command, self.playback_command):
+        commands = [self.capture_command]
+        if self.playback_command is not None:
+            commands.append(self.playback_command)
+        for command in commands:
             if not command or shutil.which(command[0]) is None:
                 raise RuntimeError("Audio helper is missing; check capture/playback commands.")
 
@@ -62,13 +65,14 @@ class CommandAudio:
     async def start(self) -> None:
         self.preflight()
         try:
-            self.player = subprocess.Popen(
-                self.playback_command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                bufsize=0,
-            )
+            if self.playback_command is not None:
+                self.player = subprocess.Popen(
+                    self.playback_command,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    bufsize=0,
+                )
             self.recorder = subprocess.Popen(
                 self.capture_command,
                 stdin=subprocess.DEVNULL,
@@ -77,6 +81,8 @@ class CommandAudio:
                 bufsize=0,
             )
             for name, process in (("capture", self.recorder), ("playback", self.player)):
+                if process is None:
+                    continue
                 self._log_tasks.append(
                     asyncio.create_task(asyncio.to_thread(self._collect_errors, name, process))
                 )
@@ -116,6 +122,8 @@ class CommandAudio:
             ) from error
 
     async def write(self, data: bytes) -> None:
+        if self.playback_command is None:
+            return
         await asyncio.to_thread(self._write_all, data)
 
     async def close(self) -> None:
@@ -143,7 +151,13 @@ class CommandAudio:
 class AlsaAudio(CommandAudio):
     """Raw PCM transport using arecord and aplay."""
 
-    def __init__(self, input_device: str = "default", output_device: str = "default"):
+    def __init__(
+        self,
+        input_device: str = "default",
+        output_device: str = "default",
+        *,
+        playback: bool = True,
+    ):
         common = [
             "-q",
             "-t",
@@ -158,11 +172,11 @@ class AlsaAudio(CommandAudio):
         ]
         super().__init__(
             ["arecord", "-D", input_device, *common],
-            ["aplay", "-D", output_device, *common],
+            ["aplay", "-D", output_device, *common] if playback else None,
         )
 
     def preflight(self) -> None:
-        for name in ("arecord", "aplay"):
+        for name in ("arecord", "aplay") if self.playback_command is not None else ("arecord",):
             if shutil.which(name) is None:
                 raise RuntimeError(
                     f"{name} is missing. Install the platform audio utilities "
