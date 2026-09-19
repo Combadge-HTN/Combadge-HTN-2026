@@ -55,6 +55,9 @@ def test_question_without_image_is_rejected():
         ["--screenshots", "--check"],
         ["--snapshot-command", "capture-without-output-placeholder"],
         ["--screenshots", "--snapshot-command", "capture {directory}"],
+        ["--open-checkout"],
+        ["--shopify", "--check"],
+        ["--shopify", "--list-devices"],
     ],
 )
 def test_invalid_snapshot_options_fail_before_connecting(args):

@@ -2,7 +2,7 @@ import os
 from unittest.mock import patch
 
 from commbadge.cli import main
-from commbadge.config import load_settings
+from commbadge.config import SHOPIFY_PROFILE_URL, load_settings
 
 
 def test_environment_overrides_file_without_mutating_environment(tmp_path):
@@ -40,3 +40,16 @@ def test_values_are_not_interpolated(tmp_path):
     path.write_text("OPENAI_API_KEY='literal-${OTHER}'\n")
     with patch.dict(os.environ, {"OTHER": "expanded"}, clear=True):
         assert load_settings(path).openai_api_key == "literal-${OTHER}"
+
+
+def test_shopify_defaults_and_overrides(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text("SHOPIFY_AGENT_PROFILE_URL=\nSHOPIFY_COUNTRY=US\nSHOPIFY_CURRENCY=USD\n")
+    with patch.dict(os.environ, {}, clear=True):
+        settings = load_settings(path)
+        assert settings.shopify_agent_profile_url == SHOPIFY_PROFILE_URL
+        assert (settings.shopify_country, settings.shopify_currency) == ("US", "USD")
+    with patch.dict(
+        os.environ, {"SHOPIFY_AGENT_PROFILE_URL": "https://example.com/profile.json"}, clear=True
+    ):
+        assert load_settings(path).shopify_agent_profile_url == "https://example.com/profile.json"
