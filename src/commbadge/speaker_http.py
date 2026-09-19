@@ -11,6 +11,18 @@ URL = "https://api.openai.com/v1/audio/transcriptions"
 MAX_RESPONSE_BYTES = 262144
 
 
+def read_bounded(stream, limit: int) -> bytes:
+    """Read through short reads until EOF, retaining at most limit bytes."""
+    chunks = []
+    size = 0
+    while chunk := stream.read(min(65536, limit + 1 - size)):
+        size += len(chunk)
+        if size > limit:
+            raise ValueError("Input exceeds size limit")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -45,9 +57,10 @@ def request(payload: dict) -> dict:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     try:
         with opener.open(req, timeout=8) as response:
-            raw = response.read(MAX_RESPONSE_BYTES + 1)
-        if len(raw) > MAX_RESPONSE_BYTES:
-            return {"error": "oversized_response"}
+            try:
+                raw = read_bounded(response, MAX_RESPONSE_BYTES)
+            except ValueError:
+                return {"error": "oversized_response"}
         return {"result": json.loads(raw)}
     except urllib.error.HTTPError as error:
         error.close()
@@ -59,9 +72,7 @@ def request(payload: dict) -> dict:
 
 def main():
     try:
-        raw = sys.stdin.buffer.read(8 * 1024 * 1024 + 1)
-        if len(raw) > 8 * 1024 * 1024:
-            raise ValueError("oversized request")
+        raw = read_bounded(sys.stdin.buffer, 8 * 1024 * 1024)
         result = request(json.loads(raw))
     except Exception:
         result = {"error": "invalid_request"}

@@ -583,3 +583,16 @@ def test_request_worker_is_killed_on_cancellation_or_deadline(
                 os.kill(int(marker.read_text()), 0)
 
     asyncio.run(scenario())
+
+
+def test_worker_input_continues_after_short_reads():
+    from commbadge.speaker_http import read_bounded
+
+    class ShortReads(io.BytesIO):
+        def read(self, size=-1):
+            return super().read(min(size, 7))
+
+    raw = b"json-audio-payload" * 10000
+    assert read_bounded(ShortReads(raw), len(raw)) == raw
+    with pytest.raises(ValueError, match="size limit"):
+        read_bounded(ShortReads(raw), len(raw) - 1)
