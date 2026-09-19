@@ -1,6 +1,6 @@
 """Streaming 24 kHz PCM16LE / 8 kHz G.711 mu-law conversion, without audioop.
 
-Conversion runs on the relay. The badge retains its existing PCM helper contract.
+The SIP transport converts on the badge, retaining its existing PCM helper contract.
 """
 
 import math

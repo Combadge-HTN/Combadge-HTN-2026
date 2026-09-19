@@ -43,6 +43,9 @@ Have the QNX camera helper emit JPEGs no larger than 256 KiB. Larger images requ
 ## Telephone calls
 
 The [phone client](CALLING.md) uses the same native PCM helpers and `voice` dependencies.
-Twilio credentials and G.711 conversion live on the relay server. QNX device
+Direct calls use a dedicated SIP credential, TLS, and SRTP on the badge. G.711
+conversion is Python; encryption uses the system OpenSSL library through `ctypes`.
+The QNX Python build must include `ssl` and `ctypes`, and the system must provide
+`libcrypto.so.3` or `libcrypto.so`. No relay is required. QNX device
 acceptance must include a two-way call, confirmed hang-up, and verifying that the
 assistant stays disconnected after the call.

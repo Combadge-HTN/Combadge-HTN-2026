@@ -7,7 +7,7 @@ from test_live import FakeAudio, FakeConnection, event
 
 from commbadge.config import Settings
 from commbadge.live import connect_voice, run_session
-from commbadge.phone.config import PhoneSettings
+from commbadge.phone.config import PhoneSettings, SipSettings
 
 
 def call_events():
@@ -81,7 +81,10 @@ def test_call_request_completes_tool_exchange_before_finalizing_live(
 
 
 @pytest.mark.parametrize("acknowledge_close", [True, False])
-def test_voice_disconnects_before_dialing_and_never_reconnects(monkeypatch, acknowledge_close):
+@pytest.mark.parametrize("transport", ["relay", "sip"])
+def test_voice_disconnects_before_dialing_and_never_reconnects(
+    monkeypatch, acknowledge_close, transport
+):
     async def scenario():
         import websockets.asyncio.client
 
@@ -139,8 +142,21 @@ def test_voice_disconnects_before_dialing_and_never_reconnects(monkeypatch, ackn
         monkeypatch.setattr(live, "AlsaAudio", Audio)
         monkeypatch.setattr(live, "run_session", fast_session)
         monkeypatch.setattr(websockets.asyncio.client, "connect", lambda *a, **kw: Context())
-        monkeypatch.setattr(client, "contacts", names)
-        monkeypatch.setattr(client, "call_contact", phone)
+        if transport == "relay":
+            monkeypatch.setattr(client, "contacts", names)
+            monkeypatch.setattr(client, "call_contact", phone)
+            config = PhoneSettings("wss://example.com", "x" * 32)
+        else:
+            from commbadge.phone import direct
+
+            monkeypatch.setattr(direct, "call_contact", phone)
+            config = SipSettings(
+                "test.pstn.twilio.com",
+                "badge",
+                "secret-password",
+                "+14165550100",
+                {"alex": "+14165550101"},
+            )
         session = connect_voice(
             Settings(),
             check=False,
@@ -148,7 +164,7 @@ def test_voice_disconnects_before_dialing_and_never_reconnects(monkeypatch, ackn
             output_device="default",
             seconds=1,
             captions=False,
-            phone_settings=PhoneSettings("wss://example.com", "x" * 32),
+            phone_settings=config,
         )
         if not acknowledge_close:
             with pytest.raises(RuntimeError, match="finalization was not confirmed"):

@@ -17,6 +17,9 @@ def register(commands):
     call = commands.add_parser("call", help="talk directly to a configured phone contact")
     call.add_argument("contact", nargs="?")
     call.add_argument("--list-contacts", action="store_true")
+    call.add_argument(
+        "--check", action="store_true", help="check direct SIP connectivity without dialing"
+    )
     call.add_argument("--env-file", type=Path, default=Path(".env"))
     call.add_argument("--audio-backend", choices=("alsa", "commands"), default="alsa")
     call.add_argument("--capture-command")
@@ -39,6 +42,18 @@ def run(args, parser: argparse.ArgumentParser):
             from commbadge.phone.client import call_contact, contacts
 
             settings = PhoneSettings.load(args.env_file)
+            if args.check:
+                from commbadge.phone.config import SipSettings
+                from commbadge.phone.direct import check_connection
+
+                if not isinstance(settings, SipSettings):
+                    parser.error("call --check requires CALL_TRANSPORT=sip")
+                asyncio.run(check_connection(settings))
+                print(
+                    "Twilio TLS/SIP reachable. No call placed; "
+                    "audio and credentials not yet tested."
+                )
+                return 0
             if args.list_contacts:
                 print("\n".join(asyncio.run(contacts(settings))))
                 return 0
@@ -65,7 +80,7 @@ def run(args, parser: argparse.ArgumentParser):
                 finally:
                     await audio.close()
 
-            print("Calling via the relay. You speak directly; Ctrl+C hangs up.")
+            print("Starting a human phone call. You speak directly; Ctrl+C hangs up.")
             result = asyncio.run(connect())
             print(f"Call ended: {result['status']}")
         return 0

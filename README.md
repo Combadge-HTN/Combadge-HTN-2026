@@ -90,13 +90,14 @@ This uses `cosmic-screenshot` through the desktop screenshot portal. Allow its s
 
 ## Human phone calls
 
-Configure a Twilio audio relay to speak directly to another person through the badge.
+Configure a Twilio SIP trunk to speak directly to another person through the badge.
 Use `commbadge call alex` for a standalone call, or add `--calls` to a voice session
-and say “Call Alex.” Contact names and numbers are configured on the relay.
+and say “Call Alex.” Contact names and numbers are configured on the badge.
 
-The relay handles telephone audio conversion; the badge keeps its 24 kHz PCM
-helpers. Calls use Twilio credits. See [calling setup](docs/CALLING.md) for relay
-hosting, credentials, QNX commands, hang-up behavior, and validation limits.
+The badge connects directly to Twilio using TLS and encrypted SRTP audio; no relay
+server or tunnel is required. It keeps its 24 kHz PCM helpers and handles telephone
+audio conversion itself. See [calling setup](docs/CALLING.md) for credentials,
+QNX requirements, hang-up behavior, and validation limits. Calls use Twilio credits.
 
 ## Shopping with Shopify
 

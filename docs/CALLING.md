@@ -1,151 +1,116 @@
 # Human phone calls
 
-Combadge can place a phone call to a configured contact and carry the user's
-speech directly. The other person answers an ordinary phone. A voice-initiated
-call closes the GPT-Live session and its connection before dialing. The phone
-conversation then runs independently, with no audio sent to OpenAI. After hang-up,
-the command exits; the assistant does not restart automatically. Start a new voice
-session explicitly when you want the assistant again. The standalone `call`
-command needs no OpenAI key.
+Combadge places outbound calls directly through Twilio Elastic SIP Trunking:
 
-Before closing, the assistant receives a tool result confirming that the handoff
-was requested (not that the call was placed). The client submits all pending tool
-results and continues the backend response, avoiding a wait for missing results
-during shutdown. Dialing still requires OpenAI's `session.closed` acknowledgment;
-if finalization fails, no call is placed. Only the subsequent WebSocket closing
-handshake has a short timeout.
+**Badge PCM helpers ↔ Python SIP/SRTP client ↔ Twilio ↔ telephone.**
 
-## Architecture
+No relay server, tunnel, public webhook, browser, or companion phone is required.
+The user speaks directly to the other person. GPT-Live closes its session and
+connection before dialing and stays disconnected after hang-up.
 
-Badge PCM helpers ↔ Python client ↔ authenticated WSS relay ↔ Twilio ↔ telephone.
+## Twilio configuration
 
-The badge sends 20 ms frames of mono PCM16LE at 24 kHz, using the same audio helper
-contract as GPT-Live. The relay converts this to/from Twilio's mono 8 kHz G.711
-mu-law. Conversion is pure Python and does not depend on the removed `audioop`
-module. No browser, companion phone, or Twilio SDK is needed on the badge.
+In Twilio Console, open **Elastic SIP Trunking → Trunks** and create a dedicated
+trunk. Configure:
 
-The relay uses the existing `voice` dependencies, runs separately from the badge,
-and requires a publicly reachable HTTPS/WSS endpoint on a server. QNX audio, TLS, and network behavior still
-require device acceptance; this integration does not supply QNX audio drivers.
+1. **Secure Trunking:** enabled (TLS signaling and encrypted SRTP audio).
+2. **Symmetric RTP:** enabled when the badge is behind NAT, such as a Wi-Fi router.
+3. **Call Recording:** Do Not Record.
+4. **Call Transfer:** disabled.
+5. Under **Termination**, choose a domain ending in `.pstn.twilio.com` and attach
+   a Credential List with a dedicated badge username and a strong random password.
 
-## Configure the relay
+Registration is not required. Outbound caller ID must be a Twilio number owned
+by the account or an approved verified caller ID. No new number, incoming-call
+routing, or Origination URL is needed for this outbound-only client. Calls use
+Twilio credits and are subject to the account's geographic dialing permissions.
 
-Use an upgraded Twilio account with Voice/Media Streams enabled and a voice-capable
-Twilio number. Credits alone do not remove trial restrictions: Twilio's current
-trial blocks `<Stream>`.
+The network must allow outbound TCP 5061 and UDP media to Twilio. Symmetric RTP
+allows Twilio to return audio to the source of the badge's outgoing media. The
+client additionally authenticates every SRTP packet and checks for replay.
 
-Install the package with its voice extra:
+## Badge configuration
 
-```sh
-python3 -m pip install -e '.[voice]'
-```
+The runtime needs Python 3.11+, Python's `ssl` and `ctypes` modules, and system
+OpenSSL (`libcrypto.so.3` or `libcrypto.so`). AES uses OpenSSL; no native Python
+crypto wheel or SIP SDK is required. Existing microphone/speaker helpers still
+supply 20 ms mono PCM16LE frames at 24 kHz. The badge converts to/from G.711 PCMU
+at 8 kHz for the phone connection.
 
-Create an ignored `.env` on the relay host:
+Put these values in the ignored `.env`:
 
 ```dotenv
-TWILIO_ACCOUNT_SID=AC...
-TWILIO_AUTH_TOKEN=...
+CALL_TRANSPORT=sip
+CALL_SIP_DOMAIN=your-trunk.pstn.twilio.com
+CALL_SIP_USERNAME=combadge
+CALL_SIP_PASSWORD=your-dedicated-sip-password
 TWILIO_FROM_NUMBER=+14165550100
-CALL_PUBLIC_URL=https://calls.example.com
-CALL_RELAY_TOKEN=...
-CALL_CONTACTS={"alex":"+14165550101","samuel":"+14165550102"}
+CALL_CONTACTS={"edmon":"+14165550101"}
 CALL_MAX_SECONDS=300
 ```
 
-Replace the example numbers. Contacts are an explicit allowlist; a client/model
-supplies a contact name, never a destination number or TwiML. Generate the shared
-relay token with `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'` and
-store it securely on the relay and badge. Never commit credentials or contacts.
+Use actual E.164 numbers. The client accepts contact names from this allowlist;
+it does not accept arbitrary numbers from the assistant. The badge needs the SIP
+password, not the Twilio account Auth Token. No `CALL_RELAY_*` values are required.
 
-Start the relay:
-
-```sh
-commbadge phone-relay --env-file .env --host 127.0.0.1 --port 8765
-```
-
-Expose that port through a TLS reverse proxy or HTTPS tunnel that supports
-WebSocket upgrades. For example, with ngrok installed and authenticated:
-
-```sh
-ngrok http 8765
-```
-
-Set `CALL_PUBLIC_URL` to the tunnel's exact HTTPS origin and restart the relay.
-A changing tunnel address requires updating both relay and badge configuration.
-The proxy must preserve `Authorization` and `X-Twilio-Signature` headers and allow
-long-running WebSocket connections. Do not expose the plain HTTP listener directly.
-Use one relay process/replica: the current implementation keeps a single active
-call in memory. `/health` is a read-only health endpoint.
-
-The relay submits inline `<Connect><Stream>` TwiML when dialing, so no incoming
-number webhook configuration is required. This version implements outbound calls.
-
-## Configure the badge
-
-The badge only needs:
-
-```dotenv
-CALL_RELAY_URL=wss://calls.example.com
-CALL_RELAY_TOKEN=...same token as relay...
-```
-
-List configured contacts (does not place a call):
+List contacts without network access or calling anyone:
 
 ```sh
 commbadge call --list-contacts
 ```
 
-Place a human call using native PCM helpers on QNX:
+Check system crypto and direct TLS/SIP connectivity without dialing or accessing
+audio devices (this does not verify the SIP password or media path):
 
 ```sh
-commbadge call alex --audio-backend commands \
+commbadge call --check
+```
+
+Call with the hardware team's QNX PCM helpers:
+
+```sh
+commbadge call edmon --audio-backend commands \
   --capture-command '/path/to/qnx-pcm-capture' \
   --playback-command '/path/to/qnx-pcm-playback'
 ```
 
-These are placeholders for the hardware team's actual helpers, not QNX commands
-included in this repository. The [QNX audio contract](QNX.md) applies unchanged.
-The ALSA adapter can also be selected with `--audio-backend alsa`.
+These helper paths are placeholders. See the [QNX audio contract](QNX.md).
+For voice-initiated calls, add `--calls` to the existing working `commbadge voice`
+command and say **“Computer, call Edmon.”**
 
-To call through the assistant, add `--calls` to the working voice command, then
-say **“Call Alex.”** It also works alongside `--screenshots` or a camera helper:
+## Shutdown and failure behavior
 
-```sh
-commbadge voice --calls --audio-backend commands \
-  --capture-command '/path/to/qnx-pcm-capture' \
-  --playback-command '/path/to/qnx-pcm-playback' --max-seconds 900
-```
+Before closing GPT-Live, the client returns a truthful `handoff_requested` tool
+result and continues the backend response. Dialing requires OpenAI's final
+`session.closed` acknowledgment. A failed finalization never starts a call.
 
-The named contact must be unambiguous. A failed call is not automatically redialed.
-The other person can hang up, or Ctrl+C ends the call. Both exit the command;
-the assistant stays disconnected. A physical hang-up button and spoken hang-up detection during calls
-are not implemented. Call speech bypasses the AI, including a spoken “hang up.”
-Use headphones or hardware echo cancellation to avoid speaker feedback.
+The other person can hang up; Ctrl+C or the configured duration limit also ends
+the call. A pending call sends SIP CANCEL, an answered call sends BYE, and an
+answer racing cancellation is acknowledged and then ended. Calls are never
+redialed automatically. The command exits after hang-up; it does not restart the
+assistant. Spoken “hang up” and a physical hang-up button are not implemented.
 
-## Failure behavior and validation
+TLS certificates are verified and unencrypted media is rejected. The supported
+media profile is PCMU with `AES_CM_128_HMAC_SHA1_80`, no MKI or key rotation.
+Incoming calls, transfers, hold, and media renegotiation are not supported.
+Twenty seconds without authenticated incoming audio ends the local call.
 
-- Only one call is active at a time. Unknown contacts are rejected before dialing.
-- Badge requests require the relay token; Twilio stream upgrades require a valid
-  Twilio signature and matching account/call IDs.
-- Audio buffers and send timeouts are bounded. Disconnects, malformed frames,
-  busy/no-answer responses, and session cancellation end the call.
-- Calls have a 30-second ringing timeout and a provider-enforced duration limit.
-  The relay also closes calls if the media stream never arrives.
-- Call creation is never automatically retried. If its HTTP response is lost,
-  check Twilio's console before dialing again. The provider duration limit remains
-  the fallback for a call whose ID could not be recovered.
-- If hang-up cannot be confirmed, check the Twilio console and terminate the call
-  there. No application can guarantee immediate remote hang-up after a network outage.
-- No call recording is requested and no call audio is written to disk by this code.
+The duration limit is enforced by this client. Unlike the previous relay's REST
+call setup, it is not a provider-enforced per-call time limit. If network failure
+prevents confirmed hang-up, the client reports it; check the Twilio Console and
+end the call there. No call audio is recorded by this code or the configured trunk.
 
-The automated suite exercises actual loopback WebSocket connections with a fake
-carrier, including bidirectional audio, authentication, call isolation, hang-up,
-codec vectors/filtering, and closing the assistant connection before dialing. These checks do not establish
-Twilio account entitlement, public tunnel routing, real telephone audio quality,
-or QNX device compatibility. Accept the feature only after a live two-person call
-and a subsequent QNX hardware test.
+## Verification
 
-References: [Twilio Media Streams](https://www.twilio.com/docs/voice/media-streams),
-[WebSocket audio protocol](https://www.twilio.com/docs/voice/media-streams/websocket-messages),
-[request signatures](https://www.twilio.com/docs/usage/security),
-[trial restrictions](https://www.twilio.com/docs/usage/trials/try-out-voice).
+Tests cover SIP digest authentication, message framing, secure SDP, SRTP reference
+vectors, replay/tampering rejection, packet rollover, direct two-way audio with a
+simulated carrier, and cancellation/answer races. Direct TLS/SIP and encrypted
+synthetic audio have also been exercised on QNX 8 with Python 3.14. Physical audio
+acceptance still requires the microphone, speaker, and native helpers on the Pi.
+
+The former relay transport remains available with `CALL_TRANSPORT=relay`; its
+setup is documented in [CALLING_RELAY.md](CALLING_RELAY.md). It is optional.
+
+References: [Twilio SIP trunk configuration](https://www.twilio.com/docs/sip-trunking),
+[SIP RFC 3261](https://www.rfc-editor.org/rfc/rfc3261),
+[SRTP RFC 3711](https://www.rfc-editor.org/rfc/rfc3711).
