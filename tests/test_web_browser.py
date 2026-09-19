@@ -112,3 +112,45 @@ def test_cancellation_during_creation_can_still_release_remote_session():
         assert client._post.call_count == 1
 
     asyncio.run(scenario())
+
+
+def test_navigation_waits_for_redirected_main_document(monkeypatch):
+    async def scenario():
+        browser = WebBrowser(NS())
+        browser.start = AsyncMock()
+        commands = []
+
+        async def rpc(method, params=None):
+            commands.append(method)
+            if method == "Page.navigate":
+                return {"loaderId": "original-loader"}
+            if method == "Page.getFrameTree":
+                browser.loaded.add("redirect-loader")
+                return {"frameTree": {"frame": {"loaderId": "redirect-loader"}}}
+            raise AssertionError(method)
+
+        browser._rpc = rpc
+        browser._evaluate = AsyncMock(return_value=snapshot("Page content " * 30))
+        monkeypatch.setattr("commbadge.web_browser.asyncio.sleep", AsyncMock())
+        result = await browser.open("https://example.com")
+        assert result["status"] == "ok"
+        assert commands == ["Page.navigate", "Page.getFrameTree"]
+
+    asyncio.run(scenario())
+
+
+def test_duplicate_video_links_keep_descriptive_title_instead_of_duration():
+    browser = WebBrowser(NS())
+    data = snapshot()
+    data["links"] = [
+        {"url": "https://example.com/video", "title": "19:03"},
+        {"url": "https://example.com/video", "title": "The newest video"},
+    ]
+    page = browser._store(data)
+    assert page["links"] == [
+        {
+            "link_id": "p1-1",
+            "url": "https://example.com/video",
+            "title": "The newest video",
+        }
+    ]

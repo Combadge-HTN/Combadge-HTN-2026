@@ -13,6 +13,10 @@ SNAPSHOT = r"""(() => {
     const links = Array.from(root?.querySelectorAll('a[href]') || [])
         .filter(a => a.getClientRects().length && a.innerText.trim())
         .slice(0, 100).map(a => ({url: a.href, title: a.innerText.trim().slice(0, 200)}));
+    const labels = Array.from(root?.querySelectorAll('[aria-label], [title], time[datetime]') || [])
+        .filter(e => e.getClientRects().length).slice(0, 100)
+        .map(e => (e.getAttribute('aria-label') || e.getAttribute('title') ||
+            e.getAttribute('datetime') || '').slice(0, 300));
     const metadata = Array.from(document.querySelectorAll('meta[itemprop], meta[property]'))
         .slice(0, 60).map(m => ({name: m.getAttribute('itemprop') || m.getAttribute('property'),
             value: (m.content || '').slice(0, 500)}));
@@ -20,7 +24,7 @@ SNAPSHOT = r"""(() => {
         .slice(0, 3).map(s => s.textContent.slice(0, 4000));
     return {url: location.href, title: document.title,
         text: (root?.innerText || '').slice(0, 60000),
-        links, metadata, structured};
+        links, labels, metadata, structured};
 })()"""
 
 
@@ -72,7 +76,9 @@ class WebBrowser:
 
     async def start(self):
         if self.socket is not None:
-            return
+            if self.socket.close_code is None:
+                return
+            await self.close()
         from websockets.asyncio.client import connect
 
         payload = {
@@ -128,8 +134,12 @@ class WebBrowser:
                 loader = navigation.get("loaderId")
                 # Polling also drains lifecycle events, including events preceding command replies.
                 async with asyncio.timeout(12):
-                    while loader and loader not in self.loaded:
-                        await self._evaluate("document.readyState")
+                    while loader:
+                        tree = await self._rpc("Page.getFrameTree")
+                        current_loader = tree["frameTree"]["frame"].get("loaderId")
+                        # Client-side redirects can replace the initial document loaderId.
+                        if current_loader in self.loaded:
+                            break
                         await asyncio.sleep(0.2)
                 await asyncio.sleep(
                     0.8
@@ -160,18 +170,22 @@ class WebBrowser:
         self.page_number += 1
         self.links = {}
         sources = []
-        seen = set()
+        seen = {}
         for link in page.get("links", []):
             try:
                 url = public_url(link["url"])
             except ValueError, KeyError, TypeError:
                 continue
+            title = str(link.get("title") or "")[:200]
             if url in seen:
+                if len(title) > len(seen[url]["title"]):
+                    seen[url]["title"] = title
                 continue
-            seen.add(url)
             identifier = f"p{self.page_number}-{len(sources) + 1}"
             self.links[identifier] = url
-            sources.append({"link_id": identifier, "url": url, "title": link["title"][:200]})
+            source = {"link_id": identifier, "url": url, "title": title}
+            seen[url] = source
+            sources.append(source)
         self.page = {**page, "links": sources, "retrieved_at": datetime.now(UTC).isoformat()}
         self.offset = 0
         return self.excerpt()
@@ -191,6 +205,7 @@ class WebBrowser:
             "content": text[start:end],
             "links": self.page["links"],
             "metadata": self.page.get("metadata", []),
+            "accessible_labels": self.page.get("labels", []),
             "structured_data": self.page.get("structured", []),
             "retrieved_at": self.page["retrieved_at"],
             "truncated": end < len(text),

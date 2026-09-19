@@ -96,13 +96,15 @@ backend, not screenshots. Link IDs are tied to the current page, so old-page lin
 cannot accidentally navigate the new page. The browser supports public navigation,
 not logins, arbitrary button clicks, form submissions, account changes, or purchases.
 
-For **“How many views does MrBeast's latest YouTube video have, and when was it
-uploaded?”**, the backend is instructed to open the official channel in the browser,
-follow the latest relevant video, and inspect that item's count/date. Announcements
-about upcoming videos do not answer that question. Ordinary articles/docs can use
-Fetch instead. If an authoritative page plus one useful fallback cannot verify a
-fact, the assistant should state the limitation, not assume the fact does not exist.
-Blocked and login-required pages may still be inaccessible in a real browser.
+The browsing strategy is general: identify the requested facts and constraints, find
+an appropriate source, inspect it, then choose the next useful action. It can follow
+a documentation reference, move from a listing to an item, compare relevant sources,
+read a long article, or follow pagination on a JavaScript-rendered page. There are no
+site-specific query templates or answer rules. It should change strategy when a
+source is unhelpful and stop when the evidence answers the question. When evidence
+is insufficient or conflicting, it should give a qualified or partial answer instead
+of inferring that an inaccessible fact does not exist. Login walls, arbitrary button
+interactions and forms remain outside this read-only adapter's capabilities.
 
 Each Live delegation has a hard limit of **two searches, eight web tool calls, and
 60 seconds**. Tool continuations share that budget; a new delegation gets a new one.
