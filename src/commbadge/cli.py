@@ -220,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "voice" and args.list_devices:
         for name in ("arecord", "aplay"):
             if not shutil.which(name):
-                parser.exit(1, f"{name} is missing. On Linux: sudo apt install alsa-utils\n")
+                parser.exit(1, f"{name} is missing. Install the platform audio utilities.\n")
             print(f"\n{name} devices:", flush=True)
             result = subprocess.run([name, "-L"], check=False)
             if result.returncode:
@@ -346,12 +346,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {name}: {'set' if present else 'not set'}")
     host = platform.system()
     print(f"Audio tools ({host}):")
-    names = ("wave", "waverec") if host == "QNX" else ("arecord", "aplay")
+    names = ("arecord", "aplay")
     for name in names:
         status = "available" if shutil.which(name) else "missing"
         print(f"  {name}: {status}")
     if host == "QNX":
-        print("Audio: configure native PCM helpers with --audio-backend commands; see docs/QNX.md.")
+        print("Audio: arecord/aplay, or custom PCM helpers; see docs/QNX.md.")
     print("API check: commbadge voice --check")
     print("Voice options: commbadge voice --help")
     return 0
