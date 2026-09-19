@@ -39,3 +39,13 @@ Have the QNX camera helper emit JPEGs no larger than 256 KiB. Larger images requ
 3. Run `commbadge voice --check` to verify TLS, authentication, and generated audio.
 4. Run the voice client with both native helpers and verify conversational audio.
 5. Verify session shutdown, device disconnection, and network-loss handling.
+
+## Telephone calls
+
+The [phone client](CALLING.md) uses the same native PCM helpers and `voice` dependencies.
+Direct calls use a dedicated SIP credential, TLS, and SRTP on the badge. G.711
+conversion is Python; encryption uses the system OpenSSL library through `ctypes`.
+The QNX Python build must include `ssl` and `ctypes`, and the system must provide
+`libcrypto.so.3` or `libcrypto.so`. No relay is required. QNX device
+acceptance must include a two-way call, confirmed hang-up, and verifying that the
+assistant stays disconnected after the call.

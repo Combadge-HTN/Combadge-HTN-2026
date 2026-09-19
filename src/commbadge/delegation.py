@@ -45,7 +45,11 @@ class SnapshotDelegation:
         report: Callable[[str], None],
         *,
         shopping: ShoppingSession | None = None,
+        call_handler=None,
+        on_tools_submitted: Callable[[], None] | None = None,
     ):
+        self.call_handler = call_handler
+        self.on_tools_submitted = on_tools_submitted
         self.connection = connection
         self.capture = capture
         self.shopping = shopping
@@ -91,7 +95,11 @@ class SnapshotDelegation:
                     args = json.loads(call.arguments)
                     if not isinstance(args, dict):
                         raise ValueError("Tool arguments must be an object.")
-                    if call.name == "capture_snapshot" and self.capture is not None:
+                    if call.name == "call_contact" and self.call_handler is not None:
+                        if set(args) != {"contact"} or not isinstance(args["contact"], str):
+                            raise ValueError("Expected exactly one contact name")
+                        result = await self.call_handler(args["contact"])
+                    elif call.name == "capture_snapshot" and self.capture is not None:
                         if (
                             set(args) != {"question"}
                             or not isinstance(args["question"], str)
@@ -162,3 +170,5 @@ class SnapshotDelegation:
                     self.report("\nImage sent for analysis.\n")
             # Every function output in this response must be submitted before continuing.
             await self.connection.send({"type": "response.create"})
+            if self.on_tools_submitted is not None:
+                self.on_tools_submitted()

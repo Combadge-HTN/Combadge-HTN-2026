@@ -88,6 +88,17 @@ commbadge voice --screenshots
 
 This uses `cosmic-screenshot` through the desktop screenshot portal. Allow its screen-capture permission prompt if shown. Each requested screenshot is sent to OpenAI for analysis. Capture is opt-in for the session; it is not continuous recording. Capture failures are returned to the assistant, and capture helpers time out after 30 seconds. `--screenshots` and `--snapshot-command` are mutually exclusive and require a voice session rather than `--check`.
 
+## Human phone calls
+
+Configure a Twilio SIP trunk to speak directly to another person through the badge.
+Use `commbadge call alex` for a standalone call, or add `--calls` to a voice session
+and say “Call Alex.” Contact names and numbers are configured on the badge.
+
+The badge connects directly to Twilio using TLS and encrypted SRTP audio; no relay
+server or tunnel is required. It keeps its 24 kHz PCM helpers and handles telephone
+audio conversion itself. See [calling setup](docs/CALLING.md) for credentials,
+QNX requirements, hang-up behavior, and validation limits. Calls use Twilio credits.
+
 ## Shopping with Shopify
 
 Enable product discovery and checkout handoff with `--shopify`:
@@ -161,7 +172,7 @@ API references: [Shopify Global Catalog](https://shopify.dev/docs/agents/catalog
 | `BROWSERBASE_API_KEY` | Unset | Reserved for browser integration |
 | `BROWSERBASE_PROJECT_ID` | Unset | Reserved for browser integration |
 
-The client uses the GPT-Live WebSocket protocol with Responses delegation. Enabling capture registers `capture_snapshot`; `--shopify` adds catalog search, product details, and merchant checkout handoff. General browser automation and merchant inventory actions are not implemented. Voice sessions and delegated inference incur separate charges.
+The client uses the GPT-Live WebSocket protocol with Responses delegation. `--calls` registers `call_contact`. Enabling capture registers `capture_snapshot`; `--shopify` adds catalog search, product details, and merchant checkout handoff. General browser automation and merchant inventory actions are not implemented. Voice sessions and delegated inference incur separate charges.
 
 ## Documentation
 
