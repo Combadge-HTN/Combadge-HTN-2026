@@ -8,9 +8,11 @@ import platform
 import shlex
 import shutil
 import subprocess
+import sys
 from importlib.metadata import version
 from pathlib import Path
 
+from commbadge.browserbase import BrowserbaseClient, BrowserSession
 from commbadge.capture import COSMIC_SCREENSHOT, SnapshotCapture
 from commbadge.config import load_settings
 from commbadge.shop_account import DEFAULT_AUTH_FILE, ShopAccount, TokenStore
@@ -93,6 +95,22 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="read the recorded checkout from its merchant; no mutation",
     )
+    voice.add_argument(
+        "--browserbase",
+        action="store_true",
+        help="enable public website lookups through a hosted cloud browser",
+    )
+    voice.add_argument(
+        "--browser-timeout",
+        type=positive_seconds,
+        default=120,
+        help="time limit per browser lookup, up to 300 seconds",
+    )
+    browse = commands.add_parser("browse", help="answer a public web question using Browserbase")
+    browse.add_argument("question")
+    browse.add_argument("--url", help="public HTTPS starting URL; omit to search")
+    browse.add_argument("--env-file", type=Path, default=Path(".env"))
+    browse.add_argument("--timeout", type=positive_seconds, default=120)
     shop = commands.add_parser(
         "shop", help="search Shopify products by description and optional image"
     )
@@ -139,7 +157,12 @@ def main(argv: list[str] | None = None) -> int:
     image = None
     snapshot_capture = None
     shopping = None
+    browser = None
     if args.command == "voice":
+        if args.browserbase and (args.check or args.list_devices):
+            parser.error("--browserbase requires a voice session, not --check or --list-devices")
+        if args.browserbase and args.browser_timeout > 300:
+            parser.error("--browser-timeout must be at most 300 seconds")
         if args.shop_account and not args.shopify:
             parser.error("--shop-account requires --shopify")
         if args.shop_account and args.open_checkout:
@@ -194,6 +217,25 @@ def main(argv: list[str] | None = None) -> int:
     except OSError:
         parser.exit(1, "Could not read the selected environment file. Check its permissions.\n")
 
+    if args.command == "browse" or (args.command == "voice" and args.browserbase):
+        try:
+            browser = BrowserSession(
+                BrowserbaseClient(settings.browserbase_api_key),
+                timeout=args.timeout if args.command == "browse" else args.browser_timeout,
+                report=(lambda text: print(text, end="", flush=True))
+                if args.command == "voice"
+                else (lambda _: None),
+            )
+            if args.command == "browse":
+                print("Browserbase lookup uses paid service credits.", file=sys.stderr)
+                result = asyncio.run(browser.lookup(args.question, args.url))
+                print(json.dumps(result, indent=2, ensure_ascii=False))
+                return 0 if result["status"] == "completed" else 1
+        except KeyboardInterrupt:
+            return 130
+        except (OSError, ValueError, RuntimeError) as error:
+            parser.exit(1, f"Browserbase failed: {error}\n")
+
     if args.command == "shop" or (args.command == "voice" and args.shopify):
         try:
             account = None
@@ -247,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
                     snapshot_capture=snapshot_capture,
                     phone_settings=phone_settings,
                     shopping=shopping,
+                    browser=browser,
                     playback_command=shlex.split(args.playback_command)
                     if args.playback_command
                     else None,

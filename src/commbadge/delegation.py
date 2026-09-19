@@ -45,9 +45,11 @@ class SnapshotDelegation:
         report: Callable[[str], None],
         *,
         shopping: ShoppingSession | None = None,
+        browser=None,
         call_handler=None,
         on_tools_submitted: Callable[[], None] | None = None,
     ):
+        self.browser = browser
         self.call_handler = call_handler
         self.on_tools_submitted = on_tools_submitted
         self.connection = connection
@@ -99,6 +101,10 @@ class SnapshotDelegation:
                         if set(args) != {"contact"} or not isinstance(args["contact"], str):
                             raise ValueError("Expected exactly one contact name")
                         result = await self.call_handler(args["contact"])
+                    elif call.name == "browse_web" and self.browser is not None:
+                        if set(args) != {"question", "url"}:
+                            raise ValueError("Expected a web question and an optional URL.")
+                        result = await self.browser.lookup(**args)
                     elif call.name == "capture_snapshot" and self.capture is not None:
                         if (
                             set(args) != {"question"}

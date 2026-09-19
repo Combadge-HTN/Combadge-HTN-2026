@@ -106,6 +106,31 @@ server or tunnel is required. It keeps its 24 kHz PCM helpers and handles teleph
 audio conversion itself. See [calling setup](docs/CALLING.md) for credentials,
 QNX requirements, hang-up behavior, and validation limits. Calls use Twilio credits.
 
+## Public web lookups with Browserbase
+
+Enable `--browserbase` on the voice command and ask **“Computer, check example.com and tell me what it is for.”** Computer delegates the question to a hosted Browserbase Agent, waits while microphone audio continues, then speaks a short answer using the returned sources. For a question without a known URL, the agent can search first. This is a separate cloud browser; it cannot see the badge's camera, your current desktop tab, or your signed-in accounts.
+
+```sh
+commbadge voice --browserbase \
+  --audio-backend commands \
+  --capture-command '/path/to/capture-helper' \
+  --playback-command '/path/to/playback-helper'
+```
+
+The same integration can be used without audio or an OpenAI key:
+
+```sh
+commbadge browse 'What is this website for?' --url https://example.com
+```
+
+Set `BROWSERBASE_API_KEY` in the selected environment file. The hosted Agents route does not require `BROWSERBASE_PROJECT_ID`, a Composio key, a local browser, Node.js, or Playwright. It uses Python standard-library HTTPS. QNX TLS/networking still requires target validation. Browserbase usage is billed separately from OpenAI voice usage.
+
+This first integration is for public information lookup. It supplies no login credentials or persisted browser context and instructs the hosted agent not to submit forms, send messages, purchase, book, or modify accounts. These instructions are not a server-enforced read-only permission system; authenticated actions need a separate integration design. Website content and returned answers are treated as untrusted evidence. Shopify and calling retain their dedicated tools.
+
+Lookups default to a 120-second waiting limit (`--browser-timeout` on voice, `--timeout` on browse; maximum 300). Active network requests can add up to 20 seconds per request. On timeout or session shutdown, the app requests that an unfinished run stop. It reports a stop failure rather than assuming cleanup succeeded. Run creation is never automatically retried: if its response is lost, inspect Browserbase's run history before starting another task. Voice output prints the run ID; CLI JSON also includes the session ID when available for inspection in the Browserbase dashboard. Answer text is bounded and success requires a completed run with source URLs.
+
+Composio also offers [Browserbase MCP](https://docs.composio.dev/toolkits/browserbase_mcp) with Start, Navigate, Observe, Act, Extract, and End tools, and a separate [Browserbase management toolkit](https://docs.composio.dev/toolkits/browserbase_tool) for sessions and contexts. It could provide managed tool connections across integrations, but is not required or implemented here. The current adapter uses [Browserbase Agents directly](https://docs.browserbase.com/reference/api/run-an-agent).
+
 ## Shopping with Shopify
 
 Enable product discovery and checkout handoff with `--shopify`:
@@ -176,10 +201,10 @@ API references: [Shopify Global Catalog](https://shopify.dev/docs/agents/catalog
 | `OPENAI_LIVE_MODEL` | `gpt-live-1` | Voice model |
 | `OPENAI_LIVE_VOICE` | `marin` | Response voice |
 | `OPENAI_BACKEND_MODEL` | `gpt-5.6-luna` | Delegated reasoning model |
-| `BROWSERBASE_API_KEY` | Unset | Reserved for browser integration |
-| `BROWSERBASE_PROJECT_ID` | Unset | Reserved for browser integration |
+| `BROWSERBASE_API_KEY` | Unset | Hosted public web lookups with `--browserbase` |
+| `BROWSERBASE_PROJECT_ID` | Unset | Reserved for lower-level browser session integrations |
 
-The client uses the GPT-Live WebSocket protocol with Responses delegation. `--calls` registers `call_contact`. Enabling capture registers `capture_snapshot`; `--shopify` adds catalog search, product details, and merchant checkout handoff. General browser automation and merchant inventory actions are not implemented. Voice sessions and delegated inference incur separate charges.
+The client uses the GPT-Live WebSocket protocol with Responses delegation. `--calls` registers `call_contact`. Enabling capture registers `capture_snapshot`; `--shopify` adds catalog search, product details, and merchant checkout handoff. `--browserbase` adds public web research through `browse_web`. Authenticated browser actions and merchant inventory actions are not implemented. Voice sessions and delegated inference incur separate charges.
 
 ## Documentation
 
