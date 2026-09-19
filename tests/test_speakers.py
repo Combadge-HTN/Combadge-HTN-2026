@@ -562,7 +562,10 @@ def test_request_worker_is_killed_on_cancellation_or_deadline(
     import sys
 
     marker = tmp_path / "worker.pid"
-    code = f"import os,time,pathlib; pathlib.Path({str(marker)!r}).write_text(str(os.getpid())); time.sleep(30)"
+    code = (
+        f"import os,time,pathlib; pathlib.Path({str(marker)!r}).write_text(str(os.getpid())); "
+        "time.sleep(30)"
+    )
     monkeypatch.setattr("commbadge.speakers.REQUEST_TIMEOUT", 5 if cancel_request else 0.3)
 
     async def scenario():
