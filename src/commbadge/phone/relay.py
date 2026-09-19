@@ -67,7 +67,7 @@ class PhoneRelay:
                 await self.badge(ws)
             else:
                 await self.media(ws)
-        except (ConnectionClosed, TimeoutError, ValueError, KeyError, TypeError, RuntimeError):
+        except ConnectionClosed, TimeoutError, ValueError, KeyError, TypeError, RuntimeError:
             with suppress(ConnectionClosed, TimeoutError):
                 await send(
                     ws,

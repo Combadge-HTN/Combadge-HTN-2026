@@ -393,7 +393,7 @@ async def call_contact(settings, contact, audio, *, seconds=300, report=print):
         try:
             await call.hangup()
             confirmed = call.ended or not call.invited
-        except (OSError, TimeoutError, ValueError, RuntimeError):
+        except OSError, TimeoutError, ValueError, RuntimeError:
             report("\nHang-up unconfirmed; check Twilio console.\n")
         finally:
             await call.close()

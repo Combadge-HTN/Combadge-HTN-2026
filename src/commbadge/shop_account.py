@@ -62,12 +62,12 @@ def request(url, *, form=None, payload=None, token=None, headers=None):
                 "invalid_grant",
             ):
                 code = candidate
-        except (ValueError, TypeError, AttributeError):
+        except ValueError, TypeError, AttributeError:
             pass
         raise ShopError(
             f"Shop request returned HTTP {error.code}.", status=error.code, code=code
         ) from None
-    except (OSError, TimeoutError):
+    except OSError, TimeoutError:
         raise ShopError("Shop could not be reached. Check your connection.") from None
     try:
         if len(raw) > 2 * 1024 * 1024:
@@ -76,7 +76,7 @@ def request(url, *, form=None, payload=None, token=None, headers=None):
         if not isinstance(result, dict):
             raise ValueError()
         return result
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         raise ShopError("Shop returned an invalid response.") from None
 
 
@@ -94,7 +94,7 @@ class TokenStore:
             return value
         except FileNotFoundError:
             return {}
-        except (OSError, ValueError):
+        except OSError, ValueError:
             raise ShopError("Cannot read Shop credentials. Run shop-account login again.") from None
 
     def write(self, value):
@@ -196,7 +196,7 @@ class ShopAccount:
             interval = max(1, int(device.get("interval", 5)))
             deadline = time.monotonic() + min(int(device["expires_in"]), 1800)
             device_code = device["device_code"]
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             raise ShopError("Shop did not return a valid sign-in request.") from None
         report(f"Open this link on your phone and connect your Shop account:\n{url}")
         while time.monotonic() < deadline:
@@ -319,7 +319,7 @@ class ShopAccount:
             raise ShopError("Shop could not authorize this merchant.")
         try:
             buyer_ip = str(ipaddress.ip_address(request("https://api.ipify.org?format=json")["ip"]))
-        except (KeyError, ValueError, TypeError):
+        except KeyError, ValueError, TypeError:
             raise ShopError("Could not determine the buyer network address.") from None
         return merchant_token, buyer_ip
 
@@ -403,7 +403,7 @@ def checkout_evidence(envelope):
             and type(total.get("amount")) is int
         }
         return evidence
-    except (KeyError, ValueError, TypeError, AttributeError, StopIteration):
+    except KeyError, ValueError, TypeError, AttributeError, StopIteration:
         return {"malformed_response": True}
 
 
@@ -455,5 +455,5 @@ def checkout_summary(envelope, variant_id, quantity):
             "Do not claim it is in the app or cart. "
             "No payment or order was submitted. Totals may change during final review.",
         }
-    except (KeyError, ValueError, TypeError, AttributeError, StopIteration):
+    except KeyError, ValueError, TypeError, AttributeError, StopIteration:
         raise ShopError("Shop did not confirm the requested unpaid checkout.") from None

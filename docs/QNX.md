@@ -4,7 +4,7 @@ Target: Raspberry Pi 5, QNX 8.0, aarch64le, Python 3.14.
 
 ## Runtime
 
-The application requires Python 3.11+, TLS certificates, DNS, outbound secure WebSocket access, asyncio, and subprocess support. Runtime dependencies are `python-dotenv` and `websockets`; both provide pure-Python wheels. Install the pinned dependencies using the [setup instructions](../README.md#setup).
+The application requires Python 3.14, TLS certificates, DNS, outbound secure WebSocket access, asyncio, and subprocess support. Runtime dependencies are `python-dotenv` and `websockets`; both provide pure-Python wheels. Install the pinned dependencies using the [setup instructions](../README.md#setup).
 
 The session layer uses the [GPT-Live WebSocket protocol](https://developers.openai.com/api/docs/guides/voice-websockets?api=live) directly. QNX runtime execution and end-to-end audio remain unvalidated.
 

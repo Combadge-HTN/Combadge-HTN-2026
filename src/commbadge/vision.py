@@ -56,7 +56,7 @@ class ImageInput:
     question: str
 
     @classmethod
-    def from_bytes(cls, data: bytes, question: str = DEFAULT_QUESTION) -> "ImageInput":
+    def from_bytes(cls, data: bytes, question: str = DEFAULT_QUESTION) -> ImageInput:
         """Accept encoded JPEG, PNG, or WebP bytes from a file or camera adapter."""
         if not data or len(data) > MAX_IMAGE_BYTES:
             raise ValueError("Image must be non-empty and no larger than 20 MiB.")
@@ -76,7 +76,7 @@ class ImageInput:
         return cls(f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}", question)
 
     @classmethod
-    def from_file(cls, path: Path, question: str = DEFAULT_QUESTION) -> "ImageInput":
+    def from_file(cls, path: Path, question: str = DEFAULT_QUESTION) -> ImageInput:
         with path.open("rb") as source:
             data = source.read(MAX_IMAGE_BYTES + 1)
         return cls.from_bytes(data, question)
