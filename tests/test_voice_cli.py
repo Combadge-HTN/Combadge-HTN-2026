@@ -32,3 +32,18 @@ def test_duration_must_be_positive_and_finite(value):
     with pytest.raises(SystemExit) as error:
         main(["voice", f"--max-seconds={value}"])
     assert error.value.code == 2
+
+
+def test_invalid_image_fails_before_connecting(tmp_path):
+    path = tmp_path / "invalid.png"
+    path.write_text("not an image")
+    with patch("commbadge.live.connect_voice") as connect, pytest.raises(SystemExit) as error:
+        main(["voice", "--image", str(path), "--check"])
+    assert error.value.code == 2
+    connect.assert_not_called()
+
+
+def test_question_without_image_is_rejected():
+    with pytest.raises(SystemExit) as error:
+        main(["voice", "--question", "What is this?"])
+    assert error.value.code == 2

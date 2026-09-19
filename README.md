@@ -41,6 +41,30 @@ Press **Ctrl+C** to end the session. Sessions default to five minutes; use `--ma
 
 `commbadge doctor` reports configuration and audio utility availability. `commbadge voice --check` verifies API access and generated audio without opening audio devices; it consumes API credits.
 
+## Image questions
+
+Add a still image and question to the voice command:
+
+```sh
+commbadge voice --audio-backend commands \
+  --capture-command '/path/to/capture-helper' \
+  --playback-command '/path/to/playback-helper' \
+  --image /path/to/image.png \
+  --question 'What is shown in this image?'
+```
+
+The application sends the image once to the configured vision-capable Responses backend. GPT-Live speaks about the findings, and subsequent voice questions can refer to the same image. This uses a still image, not a continuous camera feed. JPEG, PNG, and WebP inputs up to 5 MiB are accepted. Image contents are sent to OpenAI; no public image URL is required.
+
+To check image delegation without opening audio devices:
+
+```sh
+commbadge voice --check --image /path/to/image.png --question 'Describe this image.'
+```
+
+The image check defaults to 45 seconds and finishes when backend analysis completes and non-silent audio arrives afterward. It checks the API path, not answer accuracy, complete speech, or physical playback. Timings report backend completion and first non-silent audio received after completion, measured from image submission; acknowledgments can affect the audio measurement. Use a spoken conversation to verify the answer itself.
+
+The camera integration boundary is `ImageInput.from_bytes(encoded_image, question)` in `src/commbadge/vision.py`. It accepts the same encoded image bytes as file input. Camera capture and voice-triggered capture tools remain to be implemented.
+
 ## Configuration
 
 | Variable | Default | Purpose |

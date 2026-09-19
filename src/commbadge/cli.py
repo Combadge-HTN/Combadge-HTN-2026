@@ -11,6 +11,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 from commbadge.config import load_settings
+from commbadge.vision import DEFAULT_QUESTION, ImageInput
 
 
 def positive_seconds(value: str) -> float:
@@ -43,10 +44,26 @@ def main(argv: list[str] | None = None) -> int:
         "--max-seconds",
         type=positive_seconds,
         default=None,
-        help="session limit after startup (default: 300; check: 15)",
+        help="session limit after startup (default: 300; check: 15; image check: 45)",
     )
     voice.add_argument("--no-captions", action="store_true", help="hide transcript output")
+    voice.add_argument("--image", type=Path, help="send a JPEG, PNG, or WebP to the vision backend")
+    voice.add_argument("--question", help="question about --image (default: describe the image)")
     args = parser.parse_args(argv)
+
+    image = None
+    if args.command == "voice":
+        if args.question is not None and args.image is None:
+            parser.error("--question requires --image")
+        if args.image is not None:
+            if args.list_devices:
+                parser.error("--image cannot be combined with --list-devices")
+            try:
+                image = ImageInput.from_file(
+                    args.image, args.question if args.question is not None else DEFAULT_QUESTION
+                )
+            except (OSError, ValueError) as error:
+                parser.error(f"Cannot load image: {error}")
 
     if args.command == "voice" and not args.check and not args.list_devices:
         if args.audio_backend == "commands":
@@ -85,11 +102,12 @@ def main(argv: list[str] | None = None) -> int:
                     check=args.check,
                     input_device=args.input_device,
                     output_device=args.output_device,
-                    seconds=args.max_seconds or (15 if args.check else 300),
+                    seconds=args.max_seconds or ((45 if image else 15) if args.check else 300),
                     captions=not args.no_captions,
                     capture_command=shlex.split(args.capture_command)
                     if args.capture_command
                     else None,
+                    image=image,
                     playback_command=shlex.split(args.playback_command)
                     if args.playback_command
                     else None,

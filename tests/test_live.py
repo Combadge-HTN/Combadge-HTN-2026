@@ -7,6 +7,7 @@ import pytest
 from commbadge.audio import FRAME_BYTES
 from commbadge.config import Settings
 from commbadge.live import run_session
+from commbadge.vision import ImageInput
 
 
 def event(kind, **values):
@@ -22,6 +23,7 @@ class FakeConnection:
         self.ready = False
         self.closed = False
         self.input = []
+        self.messages = []
         self.session = NS(
             start=self.start,
             close=self.close,
@@ -30,6 +32,7 @@ class FakeConnection:
         )
 
     async def send(self, message):
+        self.messages.append(message)
         kind = message["type"]
         if kind == "session.start":
             await self.start(session=message["session"])
@@ -39,6 +42,10 @@ class FakeConnection:
             await self.append(audio=message["audio"])
         elif kind == "session.instructions.append":
             await self.greet()
+        elif kind == "response.item.create":
+            assert self.ready
+        elif kind == "response.create":
+            assert self.ready
         else:
             raise AssertionError(f"Unknown client event: {kind}")
 
@@ -217,5 +224,103 @@ def test_unacknowledged_close_is_a_failure():
                 close_timeout=0.01,
                 report=lambda _: None,
             )
+
+    asyncio.run(scenario())
+
+
+def backend_event(kind, **values):
+    return event("response.event", delegation_id="vision_1", event=event(kind, **values))
+
+
+@pytest.mark.parametrize("check", [True, False])
+def test_image_is_delegated_after_start_and_spoken_audio_is_observed(check):
+    async def scenario():
+        stop = asyncio.Event()
+        image = ImageInput.from_bytes(b"\x89PNG\r\n\x1a\nencoded", "What color?")
+        connection = FakeConnection(
+            [
+                # In check mode, early speech must not prematurely stop delegation.
+                *([audio_event(b"\x01\x00" * FRAME_BYTES * 3)] if check else []),
+                backend_event("response.created", response=NS(id="response_1")),
+                backend_event("response.output_text.delta", delta="A red square."),
+                backend_event("response.completed", response=NS(id="response_1")),
+                audio_event(b"\x02\x00" * FRAME_BYTES * 3),
+            ]
+        )
+        reports = []
+        stats = await run_session(
+            connection,
+            FakeAudio(stop),
+            Settings(),
+            stop,
+            image=image,
+            check=check,
+            report=reports.append,
+        )
+        types = [message["type"] for message in connection.messages]
+        assert types.index("session.start") < types.index("response.item.create")
+        assert types.index("response.item.create") < types.index("response.create")
+        assert "session.instructions.append" not in types
+        startup = connection.messages[0]["session"]
+        assert startup["input"][0]["content"] == [{"type": "input_text", "text": "What color?"}]
+        assert image.data_url not in str(startup)
+        assert stats.image_answer == "A red square."
+        assert stats.image_completed and stats.image_backend_seconds is not None
+        assert stats.image_audio_seconds is not None
+        assert stats.finalized
+        assert "Vision: A red square." in "".join(reports)
+
+    asyncio.run(scenario())
+
+
+def test_incomplete_image_backend_fails_and_finalizes():
+    async def scenario():
+        stop = asyncio.Event()
+        connection = FakeConnection(
+            [
+                backend_event("response.created", response=NS(id="response_1")),
+                backend_event("response.incomplete", response=NS(id="response_1")),
+            ]
+        )
+        with pytest.raises(RuntimeError, match="Image analysis was incomplete"):
+            await run_session(
+                connection,
+                FakeAudio(stop),
+                Settings(),
+                stop,
+                image=ImageInput.from_bytes(b"\x89PNG\r\n\x1a\nencoded"),
+                check=True,
+                report=lambda _: None,
+            )
+        assert connection.closed
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("complete", [True, False])
+def test_image_check_cannot_pass_on_early_speech_or_backend_text_alone(complete):
+    async def scenario():
+        stop = asyncio.Event()
+        script = [
+            audio_event(b"\x01\x00" * FRAME_BYTES * 3),
+            backend_event("response.created", response=NS(id="response_1")),
+            backend_event("response.output_text.delta", delta="A red square."),
+        ]
+        if complete:
+            script.append(backend_event("response.completed", response=NS(id="response_1")))
+        connection = FakeConnection(script)
+        match = "No usable speech" if complete else "Image analysis did not complete"
+        with pytest.raises(RuntimeError, match=match):
+            await run_session(
+                connection,
+                FakeAudio(stop),
+                Settings(),
+                stop,
+                image=ImageInput.from_bytes(b"\x89PNG\r\n\x1a\nencoded"),
+                check=True,
+                seconds=0.02,
+                report=lambda _: None,
+            )
+        assert connection.closed
 
     asyncio.run(scenario())

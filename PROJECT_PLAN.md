@@ -11,6 +11,8 @@ Speaker   ← QNX playback helper ← Python client
 
 Chest activation, haptic feedback, and external action tools are planned. The LilyPad SimpleSnap Protoboard requires a separate controller for firmware-driven controls.
 
+Still images and questions can be submitted to the managed Responses backend through the Live connection. GPT-Live uses the backend findings in its spoken response. Camera capture will supply encoded image bytes through the same interface.
+
 ## Milestones
 
 1. Implement QNX capture/playback helpers and complete a spoken conversation on the Pi.
