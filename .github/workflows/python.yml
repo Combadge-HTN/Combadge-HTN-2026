@@ -23,7 +23,8 @@ jobs:
       - run: uv sync --locked --extra dev --extra voice --extra images --python '${{ matrix.python-version }}'
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync ruff format --check .
-      - run: uv run --no-sync pytest
+      - run: uv run --no-sync pytest -vv -o faulthandler_timeout=30
+        timeout-minutes: 2
       - run: uv run --no-sync commbadge voice --help
       - run: uv run --no-sync commbadge call --help
       - run: uv run --no-sync commbadge phone-relay --help
