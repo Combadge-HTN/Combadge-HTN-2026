@@ -1,10 +1,12 @@
 # Human phone calls
 
 Combadge can place a phone call to a configured contact and carry the user's
-speech directly. The other person answers an ordinary phone. During a voice-initiated
-call, the assistant's speaker output is muted and its input is silence. After
-hang-up, the assistant resumes. The OpenAI session remains open and billable during
-the call; call audio is not sent to it. The standalone `call` command needs no OpenAI key.
+speech directly. The other person answers an ordinary phone. A voice-initiated
+call closes the GPT-Live session and its connection before dialing. The phone
+conversation then runs independently, with no audio sent to OpenAI. After hang-up,
+the command exits; the assistant does not restart automatically. Start a new voice
+session explicitly when you want the assistant again. The standalone `call`
+command needs no OpenAI key.
 
 ## Architecture
 
@@ -108,8 +110,8 @@ commbadge voice --calls --audio-backend commands \
 ```
 
 The named contact must be unambiguous. A failed call is not automatically redialed.
-The other person can hang up to resume the assistant; Ctrl+C ends the call and
-voice session. A physical hang-up button and spoken hang-up detection during calls
+The other person can hang up, or Ctrl+C ends the call. Both exit the command;
+the assistant stays disconnected. A physical hang-up button and spoken hang-up detection during calls
 are not implemented. Call speech bypasses the AI, including a spoken “hang up.”
 Use headphones or hardware echo cancellation to avoid speaker feedback.
 
@@ -131,7 +133,7 @@ Use headphones or hardware echo cancellation to avoid speaker feedback.
 
 The automated suite exercises actual loopback WebSocket connections with a fake
 carrier, including bidirectional audio, authentication, call isolation, hang-up,
-codec vectors/filtering, and AI audio exclusion. These checks do not establish
+codec vectors/filtering, and closing the assistant connection before dialing. These checks do not establish
 Twilio account entitlement, public tunnel routing, real telephone audio quality,
 or QNX device compatibility. Accept the feature only after a live two-person call
 and a subsequent QNX hardware test.

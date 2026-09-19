@@ -16,7 +16,7 @@ from commbadge.audio import FRAME_BYTES, SilenceAudio
 from commbadge.config import Settings
 from commbadge.live import session_config
 from commbadge.phone.carrier import TwilioCarrier, stream_twiml, valid_signature
-from commbadge.phone.client import CallAudioRouter, call_contact
+from commbadge.phone.client import call_contact
 from commbadge.phone.codec import PhoneCodec, decode_sample, encode_sample
 from commbadge.phone.config import PhoneSettings, RelaySettings
 from commbadge.phone.relay import PhoneRelay
@@ -306,33 +306,6 @@ def test_client_routes_audio_and_confirms_hangup():
             result = await call_contact(config, "Alex", Audio(), seconds=0.1, report=lambda _: None)
             assert result["status"] == "completed" and ended.is_set() and heard.is_set()
             assert outputs == [bytes([1, 0]) * 480]
-
-    asyncio.run(scenario())
-
-
-def test_audio_router_never_sends_call_speech_to_ai_or_ai_speech_to_call():
-    async def scenario():
-        class Audio(SilenceAudio):
-            writes = []
-
-            async def read(self):
-                return b"\x01\0" * 480
-
-            async def write(self, data):
-                self.writes.append(data)
-
-        raw = Audio()
-        router = CallAudioRouter(raw)
-        assert any(await router.read())
-        router.active = True
-        router.forwarding = True
-        assert not any(await router.read())
-        assert any(await router.frames.get())
-        await router.write(b"AI speech")
-        assert raw.writes == []
-        router.active = False
-        await router.write(b"AI resumed")
-        assert raw.writes == [b"AI resumed"]
 
     asyncio.run(scenario())
 

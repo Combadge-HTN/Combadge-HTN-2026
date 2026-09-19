@@ -2,92 +2,170 @@ import asyncio
 import json
 from types import SimpleNamespace as NS
 
-from test_live import FakeConnection, event
+import pytest
+from test_live import FakeAudio, FakeConnection, event
 
-from commbadge.audio import FRAME_BYTES, SilenceAudio
 from commbadge.config import Settings
-from commbadge.live import run_session
+from commbadge.live import connect_voice, run_session
 from commbadge.phone.config import PhoneSettings
 
 
-def test_live_call_delegation_mutes_ai_and_resumes_after_phone(monkeypatch):
+def call_events():
+    def nested(kind, **kwargs):
+        return event("response.event", delegation_id="d1", event=event(kind, **kwargs))
+
+    return [
+        nested("response.created", response=NS(id="r1")),
+        nested(
+            "response.output_item.done",
+            item=NS(
+                type="function_call",
+                call_id="c1",
+                name="call_contact",
+                arguments='{"contact":"alex"}',
+            ),
+        ),
+        nested("response.completed", response=NS(id="r1")),
+    ]
+
+
+@pytest.mark.parametrize("acknowledge_close", [True, False])
+def test_call_request_finalizes_live_without_returning_fake_tool_result(
+    monkeypatch, acknowledge_close
+):
     async def scenario():
-        stop = asyncio.Event()
-        spoken = []
-        phone_samples = []
-        session_input = []
-        call_active = False
         from commbadge.phone import client
 
         async def names(_):
             return ["alex"]
 
-        async def phone(settings, contact, audio, **kwargs):
-            nonlocal call_active
-            assert contact == "alex"
-            call_active = True
-            for _ in range(3):
-                phone_samples.append(await audio.read())
-            await audio.write(b"\x02\0" * 480)
-            call_active = False
-            return {"status": "completed", "contact": contact}
-
         monkeypatch.setattr(client, "contacts", names)
-        monkeypatch.setattr(client, "call_contact", phone)
-
-        class Audio(SilenceAudio):
-            async def read(self):
-                await asyncio.sleep(0.005)
-                return b"\x01\0" * 480
-
-            async def write(self, data):
-                spoken.append(data)
-
-        def nested(kind, **kwargs):
-            return event("response.event", delegation_id="d1", event=event(kind, **kwargs))
-
-        class Connection(FakeConnection):
-            async def append(self, *, audio):
-                import base64
-
-                if call_active:
-                    session_input.append(base64.b64decode(audio))
-                await super().append(audio=audio)
-
-            async def send(self, message):
-                await super().send(message)
-                if message["type"] == "response.create":
-                    stop.set()
-
-        connection = Connection(
-            [
-                nested("response.created", response=NS(id="r1")),
-                nested(
-                    "response.output_item.done",
-                    item=NS(
-                        type="function_call",
-                        call_id="c1",
-                        name="call_contact",
-                        arguments='{"contact":"alex"}',
-                    ),
-                ),
-                nested("response.completed", response=NS(id="r1")),
-            ]
-        )
-        stats = await run_session(
+        stop = asyncio.Event()
+        connection = FakeConnection(call_events(), acknowledge_close=acknowledge_close)
+        audio = FakeAudio(stop)
+        task = run_session(
             connection,
-            Audio(),
+            audio,
             Settings(),
             stop,
             phone_settings=PhoneSettings("wss://example.com", "x" * 32),
-            seconds=2,
+            seconds=1,
+            close_timeout=0.01,
             report=lambda _: None,
         )
-        outputs = [m["item"] for m in connection.messages if m["type"] == "response.item.create"]
-        assert json.loads(outputs[0]["output"])["status"] == "completed"
-        assert phone_samples and all(any(data) for data in phone_samples)
-        assert session_input and all(data == bytes(FRAME_BYTES) for data in session_input)
-        assert spoken == [b"\x02\0" * 480]
+        if acknowledge_close:
+            stats = await task
+            assert stats.phone_contact == "alex" and stats.finalized
+        else:
+            with pytest.raises(RuntimeError, match="finalization was not confirmed"):
+                await task
+        assert connection.closed and audio.closed
+        assert not any(m["type"] == "response.create" for m in connection.messages)
+        assert not any(m["type"] == "response.item.create" for m in connection.messages)
+
+    asyncio.run(scenario())
+
+
+def test_voice_disconnects_before_dialing_and_never_reconnects(monkeypatch):
+    async def scenario():
+        import websockets.asyncio.client
+
+        from commbadge import live
+        from commbadge.phone import client
+
+        sequence = []
+        connection = FakeConnection(call_events())
+
+        class Audio(FakeAudio):
+            def __init__(self, *_):
+                super().__init__(asyncio.Event())
+
+            def preflight(self):
+                pass
+
+            async def start(self):
+                sequence.append("audio-start")
+                self.closed = False
+                await super().start()
+
+            async def close(self):
+                sequence.append("audio-close")
+                await super().close()
+
+        class WebSocket:
+            async def send(self, data):
+                await connection.send(json.loads(data))
+
+            async def recv(self):
+                return json.dumps(await connection.recv(), default=vars)
+
+        class Context:
+            async def __aenter__(self):
+                sequence.append("openai-open")
+                return WebSocket()
+
+            async def __aexit__(self, *_):
+                assert connection.closed
+                sequence.append("openai-closed")
+
+        async def names(_):
+            return ["alex"]
+
+        async def phone(settings, contact, audio, **kwargs):
+            assert sequence[-2:] == ["openai-closed", "audio-start"]
+            assert connection.closed and not audio.closed
+            assert contact == "alex"
+            sequence.append("phone-call")
+            return {"status": "completed", "contact": contact}
+
+        monkeypatch.setattr(live, "AlsaAudio", Audio)
+        monkeypatch.setattr(websockets.asyncio.client, "connect", lambda *a, **kw: Context())
+        monkeypatch.setattr(client, "contacts", names)
+        monkeypatch.setattr(client, "call_contact", phone)
+        stats = await connect_voice(
+            Settings(),
+            check=False,
+            input_device="default",
+            output_device="default",
+            seconds=1,
+            captions=False,
+            phone_settings=PhoneSettings("wss://example.com", "x" * 32),
+        )
         assert stats.finalized
+        assert sequence == [
+            "openai-open",
+            "audio-start",
+            "audio-close",
+            "openai-closed",
+            "audio-start",
+            "phone-call",
+            "audio-close",
+        ]
+
+    asyncio.run(scenario())
+
+
+def test_stop_during_phone_call_waits_for_hangup_then_closes_audio(monkeypatch):
+    async def scenario():
+        from commbadge.phone import client
+
+        stop, started, hung_up = (asyncio.Event() for _ in range(3))
+        audio = FakeAudio(stop)
+
+        async def phone(*args, **kwargs):
+            started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                await asyncio.sleep(0.01)
+                assert not audio.closed
+                hung_up.set()
+
+        monkeypatch.setattr(client, "call_contact", phone)
+        task = asyncio.create_task(client.call_until_stopped(None, "alex", audio, stop))
+        await asyncio.wait_for(started.wait(), 1)
+        stop.set()
+        assert await asyncio.wait_for(task, 1) is None
+        assert hung_up.is_set() and audio.closed
 
     asyncio.run(scenario())

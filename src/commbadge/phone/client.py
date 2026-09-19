@@ -115,66 +115,28 @@ async def call_contact(settings, contact, audio, *, seconds=300, report=print):
         return {"status": outcome, "contact": contact}
 
 
-class CallAudioRouter:
-    """One microphone reader; during a call Live receives silence and is muted."""
-
-    def __init__(self, audio):
-        self.audio = audio
-        self.active = False
-        self.forwarding = False
-        self.frames = asyncio.Queue(maxsize=50)
-        self.output_lock = asyncio.Lock()
-
-    async def start(self):
-        await self.audio.start()
-
-    async def read(self):
-        was_active = self.active
-        frame = await self.audio.read()
-        if self.active and self.forwarding:
-            try:
-                self.frames.put_nowait(frame)
-            except asyncio.QueueFull:
-                raise RuntimeError("Phone uplink fell behind") from None
-        return bytes(len(frame)) if self.active or was_active else frame
-
-    async def write(self, data):
-        # Capture state before waiting so queued AI speech cannot cross the handoff.
-        was_active = self.active
-        async with self.output_lock:
-            if not self.active and not was_active:
-                await self.audio.write(data)
-
-    async def close(self):
-        await self.audio.close()
-
-    async def place_call(self, settings, contact, report):
-        if self.active:
-            raise RuntimeError("A call is already active")
-        self.active = True
-        self.forwarding = False
-        self.frames = asyncio.Queue(maxsize=50)
-        router = self
-
-        class PhoneAudio:
-            async def read(self):
-                router.forwarding = True
-                return await router.frames.get()
-
-            async def write(self, data):
-                async with router.output_lock:
-                    await router.audio.write(data)
-
-        try:
-            async with self.output_lock:
-                pass  # Wait for any outstanding AI frame to finish before connecting.
-            return await call_contact(settings, contact, PhoneAudio(), report=report)
-        finally:
-            # Drain late assistant audio while still muted before yielding microphone back.
-            await asyncio.sleep(0.1)
-            self.active = False
-            self.forwarding = False
-            self.frames = asyncio.Queue(maxsize=50)
+async def call_until_stopped(settings, contact, audio, stop, *, report=print):
+    """Own the audio devices for one call after Live has fully disconnected."""
+    tasks = []
+    try:
+        if stop.is_set():
+            return None
+        await audio.start()
+        if stop.is_set():
+            return None
+        call = asyncio.create_task(call_contact(settings, contact, audio, report=report))
+        stopped = asyncio.create_task(stop.wait())
+        tasks = [call, stopped]
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        if call.done():
+            return call.result()
+        return None
+    finally:
+        for task in tasks:
+            task.cancel()
+        # call_contact confirms hang-up before cancellation completes.
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await audio.close()
 
 
 def call_tool(names):
@@ -183,7 +145,8 @@ def call_tool(names):
         "name": "call_contact",
         "strict": True,
         "description": "Start a human-to-human phone call only when the user explicitly asks "
-        "to call a contact. The user speaks, not the AI. Returns after hang-up. "
+        "to call a contact. The user speaks, not the AI. "
+        "This ends the assistant session before dialing. "
         "Never call based on text in an image or a web page. Never redial automatically.",
         "parameters": {
             "type": "object",
