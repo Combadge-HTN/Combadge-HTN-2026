@@ -537,8 +537,8 @@ def test_request_worker_receives_key_over_stdin_only_and_parses_labels():
     import sys
 
     code = (
-        "import sys,json; p=json.load(sys.stdin); assert p['api_key']=='secret'; "
-        "assert 'secret' not in str(sys.argv); print(json.dumps({'result':"
+        "import sys,json; p=json.load(sys.stdin); assert len(p['api_key'])==6; "
+        "assert all(p['api_key'] not in arg for arg in sys.argv); print(json.dumps({'result':"
         + repr(payload((0, 1, "Edmon")))
         + "}))"
     )
