@@ -122,6 +122,12 @@ class SnapshotDelegation:
                             ),
                             "open_shopify_checkout": (self.shopping.checkout, {"variant_id"}),
                         }
+                        if getattr(self.shopping, "account", None) is not None:
+                            handlers.pop("open_shopify_checkout")
+                            handlers["save_shopify_item"] = (
+                                self.shopping.save,
+                                {"variant_id", "quantity"},
+                            )
                         if call.name not in handlers:
                             raise ValueError("Unknown tool; no action was performed.")
                         handler, keys = handlers[call.name]

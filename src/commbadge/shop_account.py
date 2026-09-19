@@ -1,0 +1,301 @@
+"""Personal Shop account authentication and unpaid merchant checkouts (stdlib only)."""
+
+import ipaddress
+import json
+import os
+import re
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+CLIENT_ID = "5c733ab2-1903-400a-891e-7ba20c09e2a3"
+PROFILE = "https://shopify.dev/ucp/agent-profiles/2026-04-08/personal_agent.json"
+AUTH = "https://accounts.shop.app/oauth"
+DEFAULT_AUTH_FILE = Path.home() / ".local/state/commbadge/shop-auth.json"
+DOMAIN = re.compile(r"[a-z0-9][a-z0-9-]*\.myshopify\.com\Z")
+VARIANT = re.compile(r"gid://shopify/ProductVariant/[0-9]+\Z")
+
+
+class ShopError(RuntimeError):
+    def __init__(self, message, *, status=None, code=None):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def request(url, *, form=None, payload=None, token=None, headers=None):
+    """Bound responses and never expose OAuth tokens, addresses or server error bodies."""
+    data = None
+    outgoing = {"Accept": "application/json", "User-Agent": "Combadge/0.1"}
+    if form is not None:
+        data = urllib.parse.urlencode(form).encode()
+        outgoing["Content-Type"] = "application/x-www-form-urlencoded"
+    elif payload is not None:
+        data = json.dumps(payload).encode()
+        outgoing["Content-Type"] = "application/json"
+    if token:
+        outgoing["Authorization"] = f"Bearer {token}"
+    outgoing.update(headers or {})
+    req = urllib.request.Request(url, data=data, headers=outgoing)
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(req, timeout=30) as response:
+            raw = response.read(2 * 1024 * 1024 + 1)
+    except urllib.error.HTTPError as error:
+        code = None
+        try:
+            candidate = json.loads(error.read(8192)).get("error")
+            if candidate in (
+                "authorization_pending",
+                "slow_down",
+                "expired_token",
+                "access_denied",
+                "invalid_grant",
+            ):
+                code = candidate
+        except (ValueError, TypeError, AttributeError):
+            pass
+        raise ShopError(
+            f"Shop request returned HTTP {error.code}.", status=error.code, code=code
+        ) from None
+    except (OSError, TimeoutError):
+        raise ShopError("Shop could not be reached. Check your connection.") from None
+    try:
+        if len(raw) > 2 * 1024 * 1024:
+            raise ValueError()
+        result = json.loads(raw)
+        if not isinstance(result, dict):
+            raise ValueError()
+        return result
+    except (ValueError, TypeError):
+        raise ShopError("Shop returned an invalid response.") from None
+
+
+class TokenStore:
+    def __init__(self, path=DEFAULT_AUTH_FILE):
+        self.path = Path(path).expanduser()
+
+    def read(self):
+        try:
+            if self.path.stat().st_mode & 0o077:
+                raise ShopError("Shop credentials must be owner-only. Set file permissions to 600.")
+            value = json.loads(self.path.read_text())
+            if not isinstance(value, dict):
+                raise ValueError()
+            return value
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError):
+            raise ShopError("Cannot read Shop credentials. Run shop-account login again.") from None
+
+    def write(self, value):
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=".shop-auth-", dir=self.path.parent)
+        try:
+            with os.fdopen(fd, "w") as output:
+                json.dump(value, output)
+            os.replace(temporary, self.path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+
+    def clear(self):
+        self.path.unlink(missing_ok=True)
+
+
+class ShopAccount:
+    def __init__(self, store=None):
+        self.store = store if store is not None else TokenStore()
+
+    def login(self, report=print):
+        device = request(
+            f"{AUTH}/device",
+            form={
+                "client_id": CLIENT_ID,
+                "scope": "openid email personal_agent",
+                "device_name": "Computer - Combadge",
+            },
+        )
+        try:
+            url = device["verification_uri_complete"]
+            parsed = urllib.parse.urlsplit(url)
+            if parsed.scheme != "https" or parsed.netloc != "accounts.shop.app":
+                raise ValueError()
+            interval = max(1, int(device.get("interval", 5)))
+            deadline = time.monotonic() + min(int(device["expires_in"]), 1800)
+            device_code = device["device_code"]
+        except (KeyError, TypeError, ValueError):
+            raise ShopError("Shop did not return a valid sign-in request.") from None
+        report(f"Open this link on your phone and connect your Shop account:\n{url}")
+        while time.monotonic() < deadline:
+            time.sleep(interval)
+            try:
+                tokens = request(
+                    f"{AUTH}/token",
+                    form={
+                        "client_id": CLIENT_ID,
+                        "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                        "device_code": device_code,
+                    },
+                )
+            except ShopError as error:
+                if error.code in ("authorization_pending", "slow_down"):
+                    if error.code == "slow_down":
+                        interval += 5
+                    continue
+                raise ShopError(
+                    "Shop sign-in ended. Run shop-account login to try again."
+                ) from None
+            self._save_tokens(tokens)
+            report("Shop account connected.")
+            return
+        raise ShopError("Shop sign-in expired. Run shop-account login again.")
+
+    def _save_tokens(self, tokens, previous=None):
+        access = tokens.get("access_token")
+        refresh = tokens.get("refresh_token") or (previous or {}).get("refresh_token")
+        if not isinstance(access, str) or not access or not isinstance(refresh, str) or not refresh:
+            raise ShopError("Shop did not return valid account credentials.")
+        self.store.write({"access_token": access, "refresh_token": refresh})
+        return access
+
+    def access_token(self):
+        saved = self.store.read()
+        access = saved.get("access_token")
+        if not isinstance(access, str) or not access:
+            raise ShopError("Connect your Shop account first: commbadge shop-account login")
+        try:
+            request(f"{AUTH}/userinfo", token=access)
+            return access
+        except ShopError as error:
+            if error.status != 401:
+                raise
+        refresh = saved.get("refresh_token")
+        if not isinstance(refresh, str) or not refresh:
+            raise ShopError("Shop sign-in expired. Run commbadge shop-account login again.")
+        try:
+            tokens = request(
+                f"{AUTH}/token",
+                form={
+                    "client_id": CLIENT_ID,
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh,
+                },
+            )
+            return self._save_tokens(tokens, saved)
+        except ShopError:
+            raise ShopError(
+                "Shop sign-in could not be refreshed. Run shop-account login."
+            ) from None
+
+    def prepare(self, domain, variant_id, quantity, country):
+        if not isinstance(domain, str) or not DOMAIN.fullmatch(domain):
+            raise ValueError("This offer has no supported Shopify merchant domain.")
+        if not isinstance(variant_id, str) or not VARIANT.fullmatch(variant_id):
+            raise ValueError("Choose a specific Shopify variant.")
+        if type(quantity) is not int or not 1 <= quantity <= 10 or country not in ("CA", "US"):
+            raise ValueError("Quantity must be 1–10 and destination CA or US.")
+        access = self.access_token()
+        exchange = request(
+            "https://shop.app/oauth/token",
+            form={
+                "client_id": CLIENT_ID,
+                "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+                "subject_token": access,
+                "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                "resource": f"https://{domain}/",
+            },
+        )
+        merchant_token = exchange.get("access_token")
+        if not isinstance(merchant_token, str) or not merchant_token:
+            raise ShopError("Shop could not authorize this merchant.")
+        try:
+            buyer_ip = str(ipaddress.ip_address(request("https://api.ipify.org?format=json")["ip"]))
+        except (KeyError, ValueError, TypeError):
+            raise ShopError("Could not determine the buyer network address.") from None
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "create_checkout",
+                "arguments": {
+                    "meta": {"ucp-agent": {"profile": PROFILE}},
+                    "checkout": {
+                        "context": {"address_country": country},
+                        "line_items": [{"quantity": quantity, "item": {"id": variant_id}}],
+                    },
+                },
+            },
+        }
+        try:
+            envelope = request(
+                f"https://{domain}/api/ucp/mcp",
+                payload=payload,
+                token=merchant_token,
+                headers={"Shopify-Buyer-Ip": buyer_ip},
+            )
+            return checkout_summary(envelope, variant_id, quantity)
+        except ShopError:
+            raise ShopError(
+                "Could not confirm checkout creation. Check your Shop app before trying again; "
+                "a checkout may already exist. No payment was requested."
+            ) from None
+
+
+def checkout_summary(envelope, variant_id, quantity):
+    """Only purchase facts leave this boundary, never buyer or payment information."""
+    try:
+        result = envelope["result"]
+        data = result.get("structuredContent")
+        if data is None:
+            data = json.loads(next(c["text"] for c in result["content"] if c["type"] == "text"))
+        checkout = data.get("checkout", data)
+        if not checkout.get("id") or checkout.get("status") not in (
+            "incomplete",
+            "requires_escalation",
+            "ready_for_complete",
+        ):
+            raise ValueError()
+        errors = [m.get("code") for m in checkout.get("messages", []) if m.get("type") == "error"]
+        if any(code != "extension_interaction_required" for code in errors):
+            raise ValueError()
+        if result.get("isError") and not (
+            checkout.get("ucp", {}).get("status") == "success"
+            and checkout["status"] == "requires_escalation"
+            and errors == ["extension_interaction_required"]
+        ):
+            raise ValueError()
+        lines = checkout["line_items"]
+        if len(lines) != 1 or lines[0]["item"]["id"] != variant_id:
+            raise ValueError()
+        if lines[0]["quantity"] != quantity:
+            raise ValueError()
+        currency = checkout["currency"]
+        if currency not in ("CAD", "USD"):
+            raise ValueError()
+        totals = {}
+        for entry in checkout.get("totals", []):
+            kind, amount = entry.get("type"), entry.get("amount")
+            if kind in ("subtotal", "fulfillment", "tax", "total", "discount"):
+                if type(amount) is not int or amount < 0:
+                    raise ValueError()
+                totals[kind] = amount
+        return {
+            "status": "checkout_prepared",
+            "quantity": quantity,
+            "currency": currency,
+            "totals_minor": totals,
+            "shipping_exceeds_items": totals.get("fulfillment", 0) > totals.get("subtotal", 0),
+            "review_required": checkout["status"] != "ready_for_complete",
+            "message": "Unpaid checkout prepared in your Shop account. Check the Shop app. "
+            "No payment or order was submitted. Totals may change during final review.",
+        }
+    except (KeyError, ValueError, TypeError, AttributeError, StopIteration):
+        raise ShopError("Shop did not confirm the requested unpaid checkout.") from None

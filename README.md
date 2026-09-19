@@ -98,13 +98,32 @@ commbadge voice --shopify --snapshot-command '/path/to/camera-helper --output-di
 
 Say **“Find something like this on Shopify under fifty dollars.”** The badge captures the requested view, searches Shopify's Global Catalog using the image and your preferences, and compares relevant offers. Follow up with **“Is the first one available in blue?”** or **“Find a cheaper one.”** The most recent image is reused until you request a new capture. A shopping image is sent to both OpenAI and Shopify.
 
-On a COSMIC desktop, screen capture and browser checkout can be enabled together:
+Connect your personal Shop account once:
 
 ```sh
-commbadge voice --shopify --screenshots --open-checkout
+commbadge shop-account login
+commbadge shop-account status
 ```
 
-After selecting an offer, say **“Open checkout for that one.”** The app refreshes that variant's price and availability, then opens its merchant checkout when `--open-checkout` is enabled. Otherwise it prints and returns the checkout link. Changed offers require a new confirmation. Payment happens at the merchant; the badge does not place orders or process payment. On QNX, deliver the returned link to a companion device; a companion link transport is not included.
+Open the sign-in link on your phone and approve the connection. The command waits for approval. Then add `--shop-account` to the voice command:
+
+```sh
+commbadge voice --shopify --shop-account \
+  --audio-backend commands \
+  --capture-command '/path/to/capture-helper' \
+  --playback-command '/path/to/playback-helper' \
+  --snapshot-command '/path/to/camera-helper --output-dir {directory}'
+```
+
+Say **“Computer, find something like this under fifty dollars.”** Select a specific offer, then say **“Add that to my Shop account.”** Computer rechecks the variant and prepares an **unpaid checkout** under your connected account. Open the **Shop app on your phone** to review and complete it. Different merchants have separate checkouts. This flow was verified with two merchants; support and required review steps vary by merchant. Each save creates a checkout; it does not combine items into a shared cart or update a previous checkout.
+
+Computer reports returned checkout totals and warns when shipping exceeds the item subtotal. Missing shipping/tax amounts are not assumed to be zero. Changed offers require a new confirmation. If a request fails with an uncertain outcome, check Shop before retrying to avoid duplicate checkouts. The app exposes no payment or order-completion operation.
+
+For screen capture, use `commbadge voice --shopify --shop-account --screenshots`. Account mode does not open a browser. The separate guest flow remains available with `--shopify --open-checkout`, which opens a merchant checkout link instead; these modes cannot be combined.
+
+Credentials are stored in `~/.local/state/commbadge/shop-auth.json`, with owner-only file permissions, outside the repository. This is a plaintext credential file, not a keychain. Tokens are refreshed when needed. Use `--auth-file PATH` on `shop-account` and `--shop-auth-file PATH` on `voice` to choose another private location. `commbadge shop-account logout` deletes local credentials; revoke the agent in Shop to remove its account access. Credentials, addresses and payment details are never sent to the voice model. The merchant receives a scoped token and the buyer's public network address (resolved through ipify) for checkout authentication and risk checks.
+
+The account adapter uses Python's standard library and needs no Node.js runtime. Target networking and TLS still require QNX verification. This integration uses Shopify's personal-agent flow for an individual's connected account; broader product distribution requires confirming Shopify's applicable terms and access requirements.
 
 Search defaults to products shipping to Canada with CAD prices. `SHOPIFY_COUNTRY` supports `CA` or `US`; `SHOPIFY_CURRENCY` supports `CAD` or `USD`. Prices exclude shipping and tax. Results are candidates, not proof of an exact match or the lowest price across all stores. Catalog availability and final checkout totals can change.
 
@@ -118,7 +137,7 @@ commbadge shop 'a bottle like this' --image /path/to/product.jpg
 
 `shop` outputs JSON; its price limit is in cents. It does not require an OpenAI key. Shopify discovery uses a public UCP capability profile and does not require a merchant Admin API token. The default profile is an immutable copy of `docs/ucp-agent.json` served as JSON from the project's public repository through jsDelivr. Override `SHOPIFY_AGENT_PROFILE_URL` to host your own profile at an HTTPS URL serving `application/json`; GitHub raw's `text/plain` response is rejected by the catalog. Shopping tools are opt-in and cannot be combined with the voice `--check` flag.
 
-API references: [Shopify Global Catalog](https://shopify.dev/docs/agents/catalog/global-catalog), [agent profiles](https://shopify.dev/docs/agents/get-started/profile), and [checkout handoff](https://shopify.dev/docs/agents/carts-and-checkout).
+API references: [Shopify Global Catalog](https://shopify.dev/docs/agents/catalog/global-catalog), [agent profiles](https://shopify.dev/docs/agents/get-started/profile), and [checkout handoff](https://shopify.dev/docs/agents/carts-and-checkout), and [Shop personal agents](https://help.shop.app/en/shop/shopping/personal-agents).
 
 ## Configuration
 

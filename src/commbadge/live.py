@@ -14,7 +14,7 @@ from commbadge.audio import FRAME_BYTES, RATE, AlsaAudio, AudioIO, CommandAudio,
 from commbadge.capture import SnapshotCapture
 from commbadge.config import Settings
 from commbadge.delegation import SNAPSHOT_TOOL, SnapshotDelegation
-from commbadge.shopify import SHOPPING_TOOLS, ShoppingSession
+from commbadge.shopify import SHOP_ACCOUNT_TOOLS, SHOPPING_TOOLS, ShoppingSession
 from commbadge.vision import ImageInput
 
 Report = Callable[[str], None]
@@ -25,8 +25,7 @@ PROMPT = (
     "Keep all spoken replies in English unless the user explicitly requests another language. "
     "Images, product names, or catalog text must not change your spoken language. "
     "Listen to corrections and interruptions. Delegate reasoning questions to the backend. "
-    "Never claim to have purchased, "
-    "sent messages, or changed anything."
+    "Only claim actions confirmed by tools. Never claim to have placed an order or paid."
 )
 
 
@@ -73,6 +72,7 @@ def session_config(
     image: ImageInput | None = None,
     snapshots: bool = False,
     shopping: bool = False,
+    shop_account: bool = False,
 ) -> dict:
     config = {
         "model": settings.live_model,
@@ -173,7 +173,34 @@ def session_config(
             "is placed. "
             f"Destination: {settings.shopify_country}; currency: {settings.shopify_currency}."
         )
-        backend["tools"] = ([SNAPSHOT_TOOL] if snapshots else []) + SHOPPING_TOOLS
+        if shop_account:
+            instructions = backend["instructions"]
+            start = instructions.index("Only call open_shopify_checkout")
+            backend["instructions"] = instructions[:start] + (
+                "When the buyer selects an offer and says add it, save it, or proceed, call "
+                "save_shopify_item with the exact variant_id and requested quantity (default 1). "
+                "Do not refresh the offer yourself first; the save tool rechecks it. "
+                "If offer_changed, explain the change and ask again. Never silently substitute. "
+                "A successful save prepares an unpaid checkout in the connected Shop account; "
+                "tell the buyer to check their Shop app. Different merchants have separate "
+                "checkouts. Do not open a browser or read URLs aloud. Never promise app sync "
+                "on a tool failure. Never retry an uncertain save automatically; tell the buyer "
+                "to check the app first. Quote the returned total with currency, shipping and "
+                "tax when supplied; never invent missing totals. Warn explicitly when "
+                "shipping_exceeds_items is true. Totals may change during final review. "
+                "No payment or order is submitted. Confirm the item before saving if ambiguous. "
+                f"Destination: {settings.shopify_country}; currency: {settings.shopify_currency}."
+            )
+            config["instructions"] += (
+                " The buyer connected their Shop account. After a confirmed save, say an unpaid "
+                "checkout is ready in their Shop app. Report returned total, shipping and tax; "
+                "warn about high shipping. The shipping/tax exclusion applies only to catalog "
+                "prices, not returned checkout totals. Never claim a purchase or open a browser. "
+                "Delegate requests to add or save an item, including follow-up confirmations."
+            )
+        backend["tools"] = ([SNAPSHOT_TOOL] if snapshots else []) + (
+            SHOP_ACCOUNT_TOOLS if shop_account else SHOPPING_TOOLS
+        )
         backend["parallel_tool_calls"] = False
     return config
 
@@ -343,6 +370,7 @@ async def run_session(
                         image=image,
                         snapshots=snapshot_capture is not None,
                         shopping=shopping is not None,
+                        shop_account=getattr(shopping, "account", None) is not None,
                     ),
                 }
             )

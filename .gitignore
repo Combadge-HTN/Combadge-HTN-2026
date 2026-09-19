@@ -4,6 +4,8 @@
 !.env.example
 *.pem
 *.key
+shop-auth.json
+.shop-auth-*
 
 # Python and local tooling
 __pycache__/

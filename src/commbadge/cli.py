@@ -13,6 +13,7 @@ from pathlib import Path
 
 from commbadge.capture import COSMIC_SCREENSHOT, SnapshotCapture
 from commbadge.config import load_settings
+from commbadge.shop_account import DEFAULT_AUTH_FILE, ShopAccount, TokenStore
 from commbadge.shopify import CatalogClient, ShoppingSession
 from commbadge.vision import DEFAULT_QUESTION, ImageInput
 
@@ -67,6 +68,20 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="open requested Shopify checkout links in this device's browser",
     )
+    voice.add_argument(
+        "--shop-account",
+        action="store_true",
+        help="prepare unpaid checkouts in your connected Shop app account",
+    )
+    voice.add_argument(
+        "--shop-auth-file",
+        type=Path,
+        default=DEFAULT_AUTH_FILE,
+        help="private Shop credential file",
+    )
+    account_parser = commands.add_parser("shop-account", help="connect your personal Shop account")
+    account_parser.add_argument("action", choices=("login", "status", "logout"))
+    account_parser.add_argument("--auth-file", type=Path, default=DEFAULT_AUTH_FILE)
     shop = commands.add_parser(
         "shop", help="search Shopify products by description and optional image"
     )
@@ -76,10 +91,31 @@ def main(argv: list[str] | None = None) -> int:
     shop.add_argument("--max-price", type=int, help="maximum item price in cents (CAD by default)")
     args = parser.parse_args(argv)
 
+    if args.command == "shop-account":
+        account = ShopAccount(TokenStore(args.auth_file))
+        try:
+            if args.action == "login":
+                account.login()
+            elif args.action == "status":
+                account.access_token()
+                print("Shop account connected.")
+            else:
+                account.store.clear()
+                print("Local Shop credentials removed. Revoke agent access in Shop to disconnect.")
+            return 0
+        except KeyboardInterrupt:
+            return 130
+        except (OSError, ValueError, RuntimeError) as error:
+            parser.exit(1, f"Shop account: {error}\n")
+
     image = None
     snapshot_capture = None
     shopping = None
     if args.command == "voice":
+        if args.shop_account and not args.shopify:
+            parser.error("--shop-account requires --shopify")
+        if args.shop_account and args.open_checkout:
+            parser.error("--shop-account cannot be combined with --open-checkout")
         if args.open_checkout and not args.shopify:
             parser.error("--open-checkout requires --shopify")
         if args.shopify and (args.check or args.list_devices):
@@ -132,12 +168,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "shop" or (args.command == "voice" and args.shopify):
         try:
+            account = None
+            if args.command == "voice" and args.shop_account:
+                account = ShopAccount(TokenStore(args.shop_auth_file))
+                account.access_token()
             shopping = ShoppingSession(
                 CatalogClient(
                     settings.shopify_agent_profile_url,
                     country=settings.shopify_country,
                     currency=settings.shopify_currency,
                 ),
+                account=account,
                 open_checkout=args.command == "voice" and args.open_checkout,
                 report=(lambda text: print(text, end="", flush=True))
                 if args.command == "voice"

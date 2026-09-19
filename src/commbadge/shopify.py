@@ -10,6 +10,7 @@ import urllib.request
 import webbrowser
 from collections.abc import Callable
 
+from commbadge.shop_account import DOMAIN, ShopAccount
 from commbadge.vision import ImageInput
 
 CATALOG_URL = "https://catalog.shopify.com/api/ucp/mcp"
@@ -165,6 +166,9 @@ def _product_summary(product: dict, currency: str) -> dict:
                 "title": _text(variant.get("title") or product.get("title")),
                 "seller": _text(seller.get("name")),
                 "seller_id": _text(seller.get("id")),
+                "shop_domain": seller.get("domain", "")
+                if DOMAIN.fullmatch(str(seller.get("domain", "")))
+                else "",
                 "options": options,
                 "price_minor": amount,
                 "currency": currency,
@@ -198,9 +202,11 @@ class ShoppingSession:
         catalog: CatalogClient,
         *,
         open_checkout: bool = False,
+        account: ShopAccount | None = None,
         opener: Callable[[str], bool] = webbrowser.open,
         report: Callable[[str], None] = print,
     ):
+        self.account = account
         self.catalog = catalog
         self.open_checkout = open_checkout
         self.opener = opener
@@ -291,7 +297,9 @@ class ShoppingSession:
             "price_note": PRICE_NOTE,
         }
 
-    async def checkout(self, variant_id: str) -> dict:
+    async def _recheck(self, variant_id: str) -> dict:
+        if not isinstance(variant_id, str):
+            raise ValueError("variant_id must be a string.")
         previous = self.offers.get(variant_id)
         if previous is None:
             raise ValueError("Choose a specific variant returned by this session first.")
@@ -307,13 +315,35 @@ class ShoppingSession:
             }
         if any(
             previous[key] != fresh[key]
-            for key in ("price_minor", "currency", "options", "seller_id")
+            for key in ("price_minor", "currency", "options", "seller_id", "shop_domain")
         ):
             return {
                 "status": "offer_changed",
                 "offer": fresh,
                 "message": "Explain the change and ask the buyer again before opening checkout.",
             }
+        return {"status": "verified", "offer": fresh}
+
+    async def save(self, variant_id: str, quantity: int) -> dict:
+        if self.account is None:
+            raise ValueError("Shop account is not enabled.")
+        if type(quantity) is not int or not 1 <= quantity <= 10:
+            raise ValueError("Quantity must be an integer from 1 to 10.")
+        checked = await self._recheck(variant_id)
+        if checked["status"] != "verified":
+            return checked
+        offer = checked["offer"]
+        self.report("\nPreparing an unpaid checkout in your Shop account…\n")
+        result = await asyncio.to_thread(
+            self.account.prepare, offer["shop_domain"], variant_id, quantity, self.catalog.country
+        )
+        return {**result, "title": offer["title"], "seller": offer["seller"]}
+
+    async def checkout(self, variant_id: str) -> dict:
+        checked = await self._recheck(variant_id)
+        if checked["status"] != "verified":
+            return checked
+        fresh = checked["offer"]
         url = fresh["checkout_url"]
         if not url:
             return {
@@ -400,6 +430,20 @@ SHOPPING_TOOLS = [
         ),
         {
             "variant_id": {"type": "string"},
+        },
+    ),
+]
+
+
+SHOP_ACCOUNT_TOOLS = SHOPPING_TOOLS[:2] + [
+    _tool(
+        "save_shopify_item",
+        "Prepare an unpaid checkout in the connected Shop account after the buyer selects "
+        "an offer and asks to add it. Rechecks the offer. Does not buy or pay. "
+        "User finishes in the Shop app; different merchants have separate checkouts.",
+        {
+            "variant_id": {"type": "string"},
+            "quantity": {"type": "integer", "minimum": 1, "maximum": 10},
         },
     ),
 ]
