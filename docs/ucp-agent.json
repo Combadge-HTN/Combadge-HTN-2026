@@ -1,0 +1,13 @@
+{
+  "ucp": {
+    "version": "2026-08-25",
+    "capabilities": {
+      "dev.ucp.shopping.catalog.search": [{"version": "2026-08-25"}],
+      "dev.ucp.shopping.catalog.lookup": [{"version": "2026-08-25"}],
+      "dev.shopify.catalog.global": [{
+        "version": "2026-08-25",
+        "extends": ["dev.ucp.shopping.catalog.search", "dev.ucp.shopping.catalog.lookup"]
+      }]
+    }
+  }
+}
