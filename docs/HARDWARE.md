@@ -1,12 +1,10 @@
-# Hardware inventory and next bench test
+# Hardware
 
-Updated September 19, 2026 from the team's equipment list. Audio and hardware execution have not yet been tested.
-
-**OS update:** the Pi runs QNX OS. Linux ALSA commands elsewhere in the starter apply to the development laptop only. Use [QNX integration notes](QNX.md) to establish the Pi's audio support. USB audio support on Linux does not establish driver support on QNX.
+The Raspberry Pi 5 runs QNX 8.0. Audio interfaces require compatible QNX drivers and the [PCM transport](QNX.md#audio-interface).
 
 | Part | Role | What remains to check |
 | --- | --- | --- |
-| Raspberry Pi 5 development kit, QNX OS | Device compute and network | Exact QNX image/BSP, Python version, audio drivers, power, cooling, and SSH access |
+| Raspberry Pi 5, QNX 8.0, Python 3.14 | Device compute and network | Audio drivers, power, and cooling |
 | LilyPad SimpleSnap Protoboard | Sewable connection/prototyping board | Whether the separate Arduino SimpleSnap controller is also present |
 | Raspberry Pi camera | Later image input | Exact model and Pi 5-compatible ribbon cable |
 | Speaker with 3.5 mm plug | Voice output | Whether it is powered/amplified; exact plug and power requirements |
@@ -24,7 +22,7 @@ Yes. It contains an electret microphone and circuitry exposing three signals:
 
 The Pi's GPIO cannot directly sample this analog audio. Using AUDIO for speech requires an audio-capable ADC/codec or a compatible audio input interface, with the correct bias removal, signal level, and wiring. A USB adapter's microphone socket is not automatically compatible with this board's output. Check both circuits before connecting them. Likewise, do not connect a 5 V signal directly to a Pi GPIO.
 
-The simplest proposed MVP path is to borrow a supported USB microphone. Keep the Sound Detector available for a later analog-audio experiment or sound-presence feature.
+A USB microphone with a compatible QNX driver is an alternative to the analog capture path.
 
 Source: [SparkFun Sound Detector hookup guide](https://learn.sparkfun.com/tutorials/sound-detector-hookup-guide/all).
 
@@ -42,6 +40,6 @@ The **LilyPad Arduino SimpleSnap** is the programmable controller. The **SimpleS
 
 Sources: [SparkFun wearable Arduino comparison](https://learn.sparkfun.com/tutorials/arduino-comparison-guide/wearable-arduinos), [SparkFun SimpleSnap introduction](https://news.sparkfun.com/910).
 
-## Immediate completion criterion
+## Audio validation
 
-On the QNX Pi, first identify its supported audio framework and record/play speech using that framework's utilities or a native helper. Check intelligibility, distortion, and output volume. The unchanged `scripts/audio_check.py` can perform an equivalent bench test on the Linux laptop, but cannot be used as a QNX driver. The laptop GPT-Live voice loop can be developed in parallel.
+Record and play speech on the Pi using the selected interface's QNX utilities or native helper. Check intelligibility, distortion, output volume, and speaker-to-microphone feedback before enabling continuous conversation.

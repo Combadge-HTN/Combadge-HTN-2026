@@ -1,4 +1,4 @@
-"""Replaceable PCM audio transports; the standalone audio-check script stays independent."""
+"""PCM audio transports for voice sessions."""
 
 import asyncio
 import shutil
@@ -37,8 +37,7 @@ class SilenceAudio:
 class CommandAudio:
     """Connect raw PCM capture/playback helpers without invoking a shell.
 
-    Helpers must produce/consume mono PCM16LE at 24 kHz. This interface allows
-    native QNX helpers once its actual audio drivers and Python runtime are verified.
+    Helpers must produce/consume mono PCM16LE at 24 kHz.
     """
 
     def __init__(self, capture_command: list[str], playback_command: list[str]):
@@ -119,7 +118,7 @@ class CommandAudio:
 
 
 class AlsaAudio(CommandAudio):
-    """Linux laptop adapter. This is explicitly not a QNX audio driver."""
+    """Raw PCM transport using arecord and aplay."""
 
     def __init__(self, input_device: str = "default", output_device: str = "default"):
         common = [

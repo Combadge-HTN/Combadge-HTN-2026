@@ -24,11 +24,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="commbadge", description=__doc__)
     parser.add_argument("--version", action="version", version=version("htn-commbadge"))
     commands = parser.add_subparsers(dest="command", required=True)
-    doctor = commands.add_parser("doctor", help="show local setup status without making API calls")
+    doctor = commands.add_parser("doctor", help="show configuration and audio tool availability")
     doctor.add_argument("--env-file", type=Path, default=Path(".env"))
-    voice = commands.add_parser(
-        "voice", help="talk to GPT-Live using Linux microphone and speakers"
-    )
+    voice = commands.add_parser("voice", help="stream speech with GPT-Live")
     voice.add_argument("--env-file", type=Path, default=Path(".env"))
     voice.add_argument(
         "--check", action="store_true", help="test generated audio without a microphone"
@@ -109,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
                     message = message.replace(secret, "[REDACTED]")
             parser.exit(1, f"Voice failed: {message}\n")
 
-    print("Local configuration (presence only; credentials are not validated):")
+    print("Configuration (presence only; credentials are not validated):")
     for name, present in (
         ("OPENAI_API_KEY", bool(settings.openai_api_key)),
         ("BROWSERBASE_API_KEY", bool(settings.browserbase_api_key)),
@@ -123,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
         status = "available" if shutil.which(name) else "missing"
         print(f"  {name}: {status}")
     if host == "QNX":
-        print("QNX requires a verified native PCM adapter; see docs/QNX.md.")
-    print("Voice: commbadge voice --check, then commbadge voice")
-    print("Standalone audio checks: python scripts/audio_check.py --help")
+        print("Audio: configure native PCM helpers with --audio-backend commands; see docs/QNX.md.")
+    print("API check: commbadge voice --check")
+    print("Voice options: commbadge voice --help")
     return 0
