@@ -8,7 +8,7 @@ The application requires Python 3.14, TLS certificates, DNS, outbound secure Web
 
 
 
-The session layer uses the [GPT-Live WebSocket protocol](https://developers.openai.com/api/docs/guides/voice-websockets?api=live) directly. QNX runtime execution and end-to-end audio remain unvalidated.
+The session layer uses the [GPT-Live WebSocket protocol](https://developers.openai.com/api/docs/guides/voice-websockets?api=live) directly. The QNX runtime has been exercised with prerecorded PCM: session connection, generated audio reception, camera tool calls, speaker analysis, and catalog search. Physical microphone capture and speaker playback remain unvalidated.
 
 Speaker identification uses standard-library HTTPS in a background thread; see [speaker setup](SPEAKERS.md). It does not modify QNX or Python runtime internals.
 
@@ -48,8 +48,7 @@ For voice-triggered photos, add `--camera` to the voice command after building t
 Use a fresh output directory for each capture. For voice integration, append
 `--snapshot-command '/absolute/path/to/native/qnx-camera/combadge-camera --unit 4 --output-dir {directory}'`
 to your voice command. See the helper documentation for configuration and SDK
-compatibility requirements. Camera capture is validated separately from the
-still-unvalidated end-to-end QNX voice/audio session.
+compatibility requirements. Voice-triggered capture and image analysis have been exercised on QNX using prerecorded voice input and the physical camera. Physical microphone and speaker integration remains pending.
 
 For voice-triggered camera capture, configure `--snapshot-command` with a helper that writes one encoded JPEG, PNG, or WebP into the supplied `{directory}` and exits. The Python tool handler runs capture independently of the audio receiver, submits the tool result and image, then continues the Responses backend. Screen capture through `--screenshots` is a COSMIC-specific adapter; it does not provide a QNX camera driver.
 
@@ -57,7 +56,7 @@ The included helper emits JPEGs no larger than 256 KiB. Larger images from other
 
 ## Device acceptance
 
-`--shopify` uses standard-library HTTPS in a worker thread, so catalog requests do not block the audio receiver. Validate HTTPS certificates and thread support on the target. Checkout returns a merchant URL without payment; a headless badge needs a companion device to open that URL. `--open-checkout` uses the host browser and is optional. No additional native Python packages are required for shopping.
+`--shopify` uses standard-library HTTPS in a worker thread, so catalog requests do not block the audio receiver. HTTPS certificates and thread support have been exercised on the target. Checkout returns a merchant URL without payment; a headless badge needs a companion device to open that URL. `--open-checkout` uses the host browser and is optional. No additional native Python packages are required for shopping.
 
 1. Confirm the capture and playback devices have QNX drivers and usable PCM endpoints.
 2. Record and play intelligible speech through the selected audio interface.
