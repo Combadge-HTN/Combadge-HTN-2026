@@ -1,0 +1,24 @@
+# Local credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python and local tooling
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.agents/
+.codex/
+.DS_Store
+
+# Recordings and generated artifacts
+recordings/
+*.wav
+*.pcm
+*.log
+node_modules/
+dist/
