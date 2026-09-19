@@ -26,11 +26,30 @@ The client reads 960-byte frames (20 ms). Helpers may emit partial frames; input
 
 QNX capture/playback helpers are not included. Their implementation must use the selected audio interface's QNX driver. The presence of `wave` and `waverec` alone does not provide this raw streaming interface: their documented inputs and outputs are WAV files. Consult `use wave` and `use waverec` for the installed utilities' options.
 
-## Device acceptance
+## Camera capture
+
+The native [camera snapshot helper](../native/qnx-camera/README.md) is included
+in `native/qnx-camera`. Build it on the Pi with `make -C native/qnx-camera`.
+It has been tested with the physical IMX708 camera on unit 4, producing a
+1152 × 648 JPEG from the configured NV12 stream without sudo. It uses the
+installed Sensor Framework and TurboJPEG libraries; no Pillow is needed.
+
+```sh
+mkdir -p /tmp/badge-photo
+native/qnx-camera/combadge-camera --unit 4 --output-dir /tmp/badge-photo
+```
+
+Use a fresh output directory for each capture. For voice integration, append
+`--snapshot-command '/absolute/path/to/native/qnx-camera/combadge-camera --unit 4 --output-dir {directory}'`
+to your voice command. See the helper documentation for configuration and SDK
+compatibility requirements. Camera capture is validated separately from the
+still-unvalidated end-to-end QNX voice/audio session.
 
 For voice-triggered camera capture, configure `--snapshot-command` with a helper that writes one encoded JPEG, PNG, or WebP into the supplied `{directory}` and exits. The Python tool handler runs capture independently of the audio receiver, submits the tool result and image, then continues the Responses backend. Screen capture through `--screenshots` is a COSMIC-specific adapter; it does not provide a QNX camera driver.
 
-Have the QNX camera helper emit JPEGs no larger than 256 KiB. Larger images require the optional `images` extra (Pillow), which has native dependencies and has not been validated on QNX. The core voice installation does not depend on Pillow. Image file reading and optional resizing run in a worker thread to keep audio flowing. The app tracks a per-session image budget and requests a new voice session when it is exhausted.
+The included helper emits JPEGs no larger than 256 KiB. Larger images from other helpers require the optional `images` extra (Pillow), which has native dependencies and has not been validated on QNX. The core voice installation does not depend on Pillow. Image file reading and optional resizing run in a worker thread to keep audio flowing. The app tracks a per-session image budget and requests a new voice session when it is exhausted.
+
+## Device acceptance
 
 `--shopify` uses standard-library HTTPS in a worker thread, so catalog requests do not block the audio receiver. Validate HTTPS certificates and thread support on the target. Checkout returns a merchant URL without payment; a headless badge needs a companion device to open that URL. `--open-checkout` uses the host browser and is optional. No additional native Python packages are required for shopping.
 

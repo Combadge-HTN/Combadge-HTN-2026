@@ -6,7 +6,7 @@ The Raspberry Pi 5 runs QNX 8.0. Audio interfaces require compatible QNX drivers
 | --- | --- | --- |
 | Raspberry Pi 5, QNX 8.0, Python 3.14 | Device compute and network | Audio drivers, power, and cooling |
 | LilyPad SimpleSnap Protoboard | Sewable connection/prototyping board | Whether the separate Arduino SimpleSnap controller is also present |
-| Raspberry Pi camera | Later image input | Exact model and Pi 5-compatible ribbon cable |
+| IMX708 camera on Pi connector 2 | Snapshot image input | JPEG capture tested on QNX unit 4; end-to-end voice trigger remains to check |
 | Speaker with 3.5 mm plug | Voice output | Whether it is powered/amplified; exact plug and power requirements |
 | SparkFun Sound Detector | Analog microphone plus sound detection circuitry | Exact model, audio ADC/interface, levels, and coupling |
 | MPR121 capacitive touch sensor | Touch input for conversation activation | QNX driver tested; connection to the voice session is not yet implemented |
@@ -43,6 +43,14 @@ Sources: [SparkFun wearable Arduino comparison](https://learn.sparkfun.com/tutor
 ## Audio validation
 
 Record and play speech on the Pi using the selected interface's QNX utilities or native helper. Check intelligibility, distortion, output volume, and speaker-to-microphone feedback before enabling continuous conversation.
+
+## Camera
+
+The [native snapshot helper](../native/qnx-camera/README.md) captures from the
+IMX708 exposed as `/dev/sensor/camera4` on the tested QNX Pi. Build it with
+`make -C native/qnx-camera`, then run it with `--output-dir` pointing to an
+existing empty directory. It writes one `snapshot.jpg` and works with the
+existing Python `SnapshotCapture` class and voice `--snapshot-command` option.
 
 ## MPR121 touch sensor
 

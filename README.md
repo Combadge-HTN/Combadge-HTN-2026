@@ -78,7 +78,13 @@ For a device camera, add this option to the voice command:
 --snapshot-command '/path/to/camera-helper --output-dir {directory}'
 ```
 
-The helper must write exactly one JPEG, PNG, or WebP into `{directory}` and exit. The application supplies a fresh temporary directory, reads the image, and removes that directory. Commands run without a shell; the model cannot choose executable paths or filenames. A QNX camera helper is still required.
+The helper must write exactly one JPEG, PNG, or WebP into `{directory}` and exit. The application supplies a fresh temporary directory, reads the image, and removes that directory. Commands run without a shell; the model cannot choose executable paths or filenames.
+
+For the QNX Pi, the included [camera helper](native/qnx-camera/README.md) captures a JPEG from the IMX708 on unit 4. Build it on the Pi with `make -C native/qnx-camera`, then use:
+
+```sh
+--snapshot-command '/absolute/path/to/Combadge-HTN-2026/native/qnx-camera/combadge-camera --unit 4 --output-dir {directory}'
+```
 
 For COSMIC screen capture:
 
