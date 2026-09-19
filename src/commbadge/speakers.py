@@ -7,7 +7,6 @@ import json
 import math
 import re
 import struct
-import sys
 import time
 import wave
 from dataclasses import dataclass, field
@@ -171,54 +170,39 @@ class SpeakerAPIError(RuntimeError):
 
 
 class Transcriber:
-    def __init__(self, api_key: str, references: tuple[Reference, ...], *, worker_command=None):
+    def __init__(self, api_key: str, references: tuple[Reference, ...]):
         self.api_key = api_key
         self.references = references
-        self.worker_command = worker_command or [sys.executable, "-m", "commbadge.speaker_http"]
+        self.pending: asyncio.Task | None = None
 
     async def analyze(self, pcm: bytes) -> list[Segment]:
+        from commbadge.transcription import request
+
         if not pcm or len(pcm) % 2 or len(pcm) > BYTES_PER_SECOND * 30:
             raise ValueError("Speaker analysis requires 0–30 seconds of PCM16 audio")
-        payload = json.dumps(
-            {
-                "api_key": self.api_key,
-                "audio": base64.b64encode(pcm_wav(pcm)).decode("ascii"),
-                "references": [
-                    {"name": r.name, "audio": base64.b64encode(r.data).decode("ascii")}
-                    for r in self.references
-                ],
-            }
-        ).encode()
-        process = await asyncio.create_subprocess_exec(
-            *self.worker_command,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+        if self.pending is not None and not self.pending.done():
+            raise RuntimeError("Previous speaker request is still finishing")
+        payload = {
+            "api_key": self.api_key,
+            "audio": base64.b64encode(pcm_wav(pcm)).decode("ascii"),
+            "references": [
+                {"name": r.name, "audio": base64.b64encode(r.data).decode("ascii")}
+                for r in self.references
+            ],
+        }
+        # Match the standard-library HTTPS/thread adapter used by the catalog.
+        # Shield the request so cancellation doesn't allow another upload while
+        # the original request is still finishing. Late results are never reused.
+        self.pending = asyncio.create_task(asyncio.to_thread(request, payload))
+        async with asyncio.timeout(REQUEST_TIMEOUT):
+            response = await asyncio.shield(self.pending)
+        if type(response.get("status")) is int:
+            raise SpeakerAPIError(response["status"])
+        if "result" not in response:
+            raise RuntimeError("Speaker request failed")
+        return parse_segments(
+            response["result"], {r.name for r in self.references}, len(pcm) / BYTES_PER_SECOND
         )
-        try:
-            async with asyncio.timeout(REQUEST_TIMEOUT):
-                stdout, _ = await process.communicate(payload)
-            if process.returncode or len(stdout) > 2 * 1024 * 1024:
-                raise RuntimeError("Speaker request worker failed")
-            response = json.loads(stdout)
-            if not isinstance(response, dict):
-                raise ValueError("Invalid speaker response")
-            if type(response.get("status")) is int:
-                raise SpeakerAPIError(response["status"])
-            if "result" not in response:
-                raise RuntimeError("Speaker request failed")
-            return parse_segments(
-                response["result"], {r.name for r in self.references}, len(pcm) / BYTES_PER_SECOND
-            )
-        finally:
-            # Terminating this request also stops DNS/TLS work; no background thread
-            # survives voice shutdown or phone handoff. No runtime monkey-patching.
-            if process.returncode is None:
-                try:
-                    process.kill()
-                except ProcessLookupError:
-                    pass
-                await process.wait()
 
 
 @dataclass(frozen=True)

@@ -31,7 +31,7 @@ commbadge voice --audio-backend commands \
   --speaker Samuel=/path/to/samuel.wav
 ```
 
-Speaker analysis uses standard-library HTTPS in a short-lived worker process. No extra HTTP package or runtime patch is needed. The worker receives credentials and audio through stdin, and is terminated on cancellation or timeout. The capture contract remains 24 kHz mono PCM16. Speaker behavior with the physical microphone still requires validation; installing this prototype does not install audio drivers or helpers.
+Speaker analysis uses standard-library HTTPS in a background thread, matching the catalog adapter. No extra HTTP package, subprocess transport, or runtime patch is needed. The capture contract remains 24 kHz mono PCM16. Speaker behavior with the physical microphone still requires validation; installing this prototype does not install audio drivers or helpers.
 
 ## Behavior and latency
 
@@ -51,7 +51,7 @@ The worker sends compact observations using `session.thinking.append`. Offsets c
 - The model may miss overlap or confidently misidentify someone. The API provides no calibrated confidence score here; the application cannot guarantee rejection of every uncertain result. A single mixed microphone is not source separation.
 - Reference quality, similar voices, short utterances, room noise, and speaker playback leaking into the microphone affect accuracy. Echo cancellation remains the audio path's responsibility.
 - Authentication rejection or three consecutive analysis failures disable new identification until the voice session restarts. Other failures back off; normal voice continues. Rejected or unacknowledged context updates also disable labels rather than stopping voice.
-- Speaker work is cancelled when the voice session ends, including phone handoff. It does not listen to the subsequent call or restart the assistant after hang-up.
+- The speaker task is cancelled when the voice session ends, including phone handoff. An already-started HTTP request may finish under its socket timeout; its result is discarded and it receives no further audio. Process exit may wait for this request to finish. It does not listen to the subsequent call or restart the assistant after hang-up.
 
 Names are conversational hints, not authentication. Do not use this prototype to decide who may place a call, access an account, or approve a purchase.
 

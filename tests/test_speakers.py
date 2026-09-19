@@ -467,10 +467,10 @@ def test_three_transient_failures_disable_without_stopping_voice(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_http_worker_multipart_contract_and_raw_transcript_excluded(monkeypatch):
+def test_http_adapter_multipart_contract_and_raw_transcript_excluded(monkeypatch):
     import base64
 
-    from commbadge.speaker_http import request
+    from commbadge.transcription import request
 
     def open_request(req, timeout):
         assert req.full_url == "https://api.openai.com/v1/audio/transcriptions"
@@ -491,7 +491,7 @@ def test_http_worker_multipart_contract_and_raw_transcript_excluded(monkeypatch)
         return io.BytesIO(json.dumps(payload((0, 1, "Edmon"))).encode())
 
     monkeypatch.setattr(
-        "commbadge.speaker_http.urllib.request.build_opener", lambda *args: NS(open=open_request)
+        "commbadge.transcription.urllib.request.build_opener", lambda *args: NS(open=open_request)
     )
     result = request(
         {
@@ -504,10 +504,10 @@ def test_http_worker_multipart_contract_and_raw_transcript_excluded(monkeypatch)
 
 
 @pytest.mark.parametrize("status", [401, 403, 429, 500])
-def test_http_worker_errors_do_not_expose_remote_body(monkeypatch, status):
+def test_http_adapter_errors_do_not_expose_remote_body(monkeypatch, status):
     import urllib.error
 
-    from commbadge.speaker_http import request
+    from commbadge.transcription import request
 
     def fail(*args, **kwargs):
         raise urllib.error.HTTPError(
@@ -515,17 +515,17 @@ def test_http_worker_errors_do_not_expose_remote_body(monkeypatch, status):
         )
 
     monkeypatch.setattr(
-        "commbadge.speaker_http.urllib.request.build_opener", lambda *args: NS(open=fail)
+        "commbadge.transcription.urllib.request.build_opener", lambda *args: NS(open=fail)
     )
     result = request({"api_key": "secret", "audio": "AA==", "references": []})
     assert result == {"status": status}
 
 
-def test_http_worker_bounds_response_size(monkeypatch):
-    from commbadge.speaker_http import request
+def test_http_adapter_bounds_response_size(monkeypatch):
+    from commbadge.transcription import request
 
     monkeypatch.setattr(
-        "commbadge.speaker_http.urllib.request.build_opener",
+        "commbadge.transcription.urllib.request.build_opener",
         lambda *args: NS(open=lambda *a, **kw: io.BytesIO(b" " * 262145)),
     )
     assert request({"api_key": "secret", "audio": "AA==", "references": []}) == {
@@ -533,60 +533,8 @@ def test_http_worker_bounds_response_size(monkeypatch):
     }
 
 
-def test_request_worker_receives_key_over_stdin_only_and_parses_labels():
-    import sys
-
-    code = (
-        "import sys,json; p=json.load(sys.stdin); assert len(p['api_key'])==6; "
-        "assert all(p['api_key'] not in arg for arg in sys.argv); print(json.dumps({'result':"
-        + repr(payload((0, 1, "Edmon")))
-        + "}))"
-    )
-
-    async def scenario():
-        client = Transcriber(
-            "secret",
-            (Reference("Edmon", pcm_wav(PCM * 4)),),
-            worker_command=[sys.executable, "-c", code],
-        )
-        assert await client.analyze(PCM) == [Segment(0, 1, "Edmon")]
-
-    asyncio.run(scenario())
-
-
-@pytest.mark.parametrize("cancel_request", [True, False], ids=["cancel", "deadline"])
-def test_request_worker_is_killed_on_cancellation_or_deadline(
-    tmp_path, monkeypatch, cancel_request
-):
-    import os
-    import sys
-
-    marker = tmp_path / "worker.pid"
-    code = (
-        f"import os,time,pathlib; pathlib.Path({str(marker)!r}).write_text(str(os.getpid())); "
-        "time.sleep(30)"
-    )
-    monkeypatch.setattr("commbadge.speakers.REQUEST_TIMEOUT", 5 if cancel_request else 0.3)
-
-    async def scenario():
-        client = Transcriber("secret", (), worker_command=[sys.executable, "-c", code])
-        task = asyncio.create_task(client.analyze(PCM))
-        if cancel_request:
-            async with asyncio.timeout(3):
-                while not marker.exists():
-                    await asyncio.sleep(0.01)
-            task.cancel()
-        with pytest.raises(asyncio.CancelledError if cancel_request else TimeoutError):
-            await task
-        if marker.exists():
-            with pytest.raises(ProcessLookupError):
-                os.kill(int(marker.read_text()), 0)
-
-    asyncio.run(scenario())
-
-
-def test_worker_input_continues_after_short_reads():
-    from commbadge.speaker_http import read_bounded
+def test_http_response_continues_after_short_reads():
+    from commbadge.transcription import read_bounded
 
     class ShortReads(io.BytesIO):
         def read(self, size=-1):
@@ -596,3 +544,44 @@ def test_worker_input_continues_after_short_reads():
     assert read_bounded(ShortReads(raw), len(raw)) == raw
     with pytest.raises(ValueError, match="size limit"):
         read_bounded(ShortReads(raw), len(raw) - 1)
+
+
+@pytest.mark.parametrize("cancel_request", [True, False], ids=["cancel", "deadline"])
+def test_cancelled_analysis_does_not_reuse_results_or_start_parallel_requests(
+    monkeypatch, cancel_request
+):
+    import threading
+
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+
+    def request(data):
+        calls.append(data["audio"])
+        entered.set()
+        assert release.wait(3)
+        return {"result": payload((0, 1, "Edmon"))}
+
+    monkeypatch.setattr("commbadge.transcription.request", request)
+    monkeypatch.setattr("commbadge.speakers.REQUEST_TIMEOUT", 5 if cancel_request else 0.05)
+
+    async def scenario():
+        client = Transcriber("secret", (Reference("Edmon", pcm_wav(PCM * 4)),))
+        task = asyncio.create_task(client.analyze(PCM))
+        try:
+            async with asyncio.timeout(2):
+                while not entered.is_set():
+                    await asyncio.sleep(0.001)
+            if cancel_request:
+                task.cancel()
+            with pytest.raises(asyncio.CancelledError if cancel_request else TimeoutError):
+                await task
+            with pytest.raises(RuntimeError, match="still finishing"):
+                await client.analyze(PCM)
+            assert len(calls) == 1
+        finally:
+            release.set()
+        await client.pending
+        assert await client.analyze(PCM) == [Segment(0, 1, "Edmon")]
+        assert len(calls) == 2
+
+    asyncio.run(scenario())

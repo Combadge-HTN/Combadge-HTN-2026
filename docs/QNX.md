@@ -10,7 +10,7 @@ The application requires Python 3.14, TLS certificates, DNS, outbound secure Web
 
 The session layer uses the [GPT-Live WebSocket protocol](https://developers.openai.com/api/docs/guides/voice-websockets?api=live) directly. QNX runtime execution and end-to-end audio remain unvalidated.
 
-Speaker identification uses a cancellable standard-library HTTPS worker; see [speaker setup](SPEAKERS.md). It does not modify QNX or Python runtime internals.
+Speaker identification uses standard-library HTTPS in a background thread; see [speaker setup](SPEAKERS.md). It does not modify QNX or Python runtime internals.
 
 ## Audio interface
 

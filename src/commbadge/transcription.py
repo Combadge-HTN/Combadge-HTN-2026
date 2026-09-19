@@ -1,8 +1,7 @@
-"""One bounded transcription request; stdin/stdout keep secrets out of arguments."""
+"""Bounded standard-library HTTPS adapter for speaker transcription."""
 
 import base64
 import json
-import sys
 import urllib.error
 import urllib.request
 import uuid
@@ -68,16 +67,3 @@ def request(payload: dict) -> dict:
     except Exception:
         # Remote bodies, authorization headers and transcripts never enter diagnostics.
         return {"error": "request_failed"}
-
-
-def main():
-    try:
-        raw = read_bounded(sys.stdin.buffer, 8 * 1024 * 1024)
-        result = request(json.loads(raw))
-    except Exception:
-        result = {"error": "invalid_request"}
-    sys.stdout.write(json.dumps(result))
-
-
-if __name__ == "__main__":
-    main()
