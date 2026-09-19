@@ -37,7 +37,11 @@ def test_encoded_image_preserves_bytes_and_question(data, mime, tmp_path):
     assert payload not in repr(image)
 
 
-@pytest.mark.parametrize("data", [b"", b"plain text", b"x" * (MAX_IMAGE_BYTES + 1)])
+@pytest.mark.parametrize(
+    "data",
+    [b"", b"plain text", b"x" * (MAX_IMAGE_BYTES + 1)],
+    ids=["empty", "invalid-format", "oversized"],
+)
 def test_invalid_images_rejected(data):
     with pytest.raises(ValueError):
         ImageInput.from_bytes(data)
