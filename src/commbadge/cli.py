@@ -128,9 +128,6 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             references = load_references(args.speaker)
-            import httpx  # noqa: F401
-        except ImportError:
-            parser.exit(1, "Speaker dependencies are missing. Install the speakers extra.\n")
         except (OSError, ValueError) as error:
             parser.error(f"Cannot load speaker references: {error}")
     phone_settings = None

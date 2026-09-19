@@ -7,6 +7,7 @@ import json
 import math
 import re
 import struct
+import sys
 import time
 import wave
 from dataclasses import dataclass, field
@@ -14,9 +15,7 @@ from pathlib import Path
 
 from commbadge.audio import RATE
 
-MODEL = "gpt-4o-transcribe-diarize"
 REQUEST_TIMEOUT = 8
-URL = "https://api.openai.com/v1/audio/transcriptions"
 BYTES_PER_SECOND = RATE * 2
 MAX_WAV_BYTES = BYTES_PER_SECOND * 30 + 4096
 INSTRUCTIONS = (
@@ -172,51 +171,54 @@ class SpeakerAPIError(RuntimeError):
 
 
 class Transcriber:
-    def __init__(self, api_key: str, references: tuple[Reference, ...], *, transport=None):
+    def __init__(self, api_key: str, references: tuple[Reference, ...], *, worker_command=None):
         self.api_key = api_key
         self.references = references
-        self.transport = transport
+        self.worker_command = worker_command or [sys.executable, "-m", "commbadge.speaker_http"]
 
     async def analyze(self, pcm: bytes) -> list[Segment]:
-        import httpx
-
         if not pcm or len(pcm) % 2 or len(pcm) > BYTES_PER_SECOND * 30:
             raise ValueError("Speaker analysis requires 0–30 seconds of PCM16 audio")
-        parts = [
-            ("model", (None, MODEL)),
-            ("response_format", (None, "diarized_json")),
-            ("chunking_strategy", (None, "auto")),
-            ("file", ("audio.wav", pcm_wav(pcm), "audio/wav")),
-        ]
-        for reference in self.references:
-            data_url = "data:audio/wav;base64," + base64.b64encode(reference.data).decode("ascii")
-            parts.extend(
-                [
-                    ("known_speaker_names[]", (None, reference.name)),
-                    ("known_speaker_references[]", (None, data_url)),
-                ]
-            )
-        # A total deadline and async I/O allow prompt cancellation during phone handoff.
-        async with asyncio.timeout(REQUEST_TIMEOUT):
-            async with httpx.AsyncClient(
-                timeout=REQUEST_TIMEOUT, transport=self.transport, trust_env=False
-            ) as client:
-                async with client.stream(
-                    "POST",
-                    URL,
-                    files=parts,
-                    headers={"Authorization": f"Bearer {self.api_key}"},
-                ) as response:
-                    if response.status_code != 200:
-                        raise SpeakerAPIError(response.status_code)
-                    data = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        data.extend(chunk)
-                        if len(data) > 262144:
-                            raise ValueError("Speaker response exceeded size limit")
-        return parse_segments(
-            json.loads(data), {r.name for r in self.references}, len(pcm) / BYTES_PER_SECOND
+        payload = json.dumps(
+            {
+                "api_key": self.api_key,
+                "audio": base64.b64encode(pcm_wav(pcm)).decode("ascii"),
+                "references": [
+                    {"name": r.name, "audio": base64.b64encode(r.data).decode("ascii")}
+                    for r in self.references
+                ],
+            }
+        ).encode()
+        process = await asyncio.create_subprocess_exec(
+            *self.worker_command,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
         )
+        try:
+            async with asyncio.timeout(REQUEST_TIMEOUT):
+                stdout, _ = await process.communicate(payload)
+            if process.returncode or len(stdout) > 2 * 1024 * 1024:
+                raise RuntimeError("Speaker request worker failed")
+            response = json.loads(stdout)
+            if not isinstance(response, dict):
+                raise ValueError("Invalid speaker response")
+            if type(response.get("status")) is int:
+                raise SpeakerAPIError(response["status"])
+            if "result" not in response:
+                raise RuntimeError("Speaker request failed")
+            return parse_segments(
+                response["result"], {r.name for r in self.references}, len(pcm) / BYTES_PER_SECOND
+            )
+        finally:
+            # Terminating this request also stops DNS/TLS work; no background thread
+            # survives voice shutdown or phone handoff. No runtime monkey-patching.
+            if process.returncode is None:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                await process.wait()
 
 
 @dataclass(frozen=True)

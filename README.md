@@ -44,7 +44,7 @@ Press **Ctrl+C** to end the session. Sessions default to five minutes; use `--ma
 
 ## Speaker identification (prototype)
 
-Add `--speaker Edmon=/path/to/edmon.wav --speaker Samuel=/path/to/samuel.wav` to identify enrolled voices alongside the live conversation. Install the optional speaker dependencies first. Labels arrive asynchronously and can be wrong; overlapping speech remains experimental. See [speaker setup and limitations](docs/SPEAKERS.md).
+Add `--speaker Edmon=/path/to/edmon.wav --speaker Samuel=/path/to/samuel.wav` to identify enrolled voices alongside the live conversation. This uses the existing voice installation. Labels arrive asynchronously and can be wrong; overlapping speech remains experimental. See [speaker setup and limitations](docs/SPEAKERS.md).
 
 ## Image questions
 

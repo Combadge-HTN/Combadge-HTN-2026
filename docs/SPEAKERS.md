@@ -4,10 +4,10 @@ Add named speaker estimates to GPT-Live while microphone capture and spoken repl
 
 ## Setup
 
-Use Python 3.14 and install the pinned voice and speaker dependencies:
+Use Python 3.14 and install the pinned voice dependencies:
 
 ```sh
-python -m pip install --require-hashes -r requirements-speakers.txt
+python -m pip install --require-hashes -r requirements-voice.txt
 python -m pip install --no-deps -e .
 ```
 
@@ -31,7 +31,7 @@ commbadge voice --audio-backend commands \
   --speaker Samuel=/path/to/samuel.wav
 ```
 
-The optional HTTP client and its dependencies are pure Python. The capture contract remains 24 kHz mono PCM16. Execution of the added HTTP stack and speaker behavior with the physical microphone still require QNX validation; installing this prototype does not install audio drivers or helpers.
+Speaker analysis uses standard-library HTTPS in a short-lived worker process. No extra HTTP package or runtime patch is needed. The worker receives credentials and audio through stdin, and is terminated on cancellation or timeout. The capture contract remains 24 kHz mono PCM16. Speaker behavior with the physical microphone still requires validation; installing this prototype does not install audio drivers or helpers.
 
 ## Behavior and latency
 

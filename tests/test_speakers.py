@@ -1,9 +1,9 @@
 import asyncio
 import io
+import json
 import wave
 from types import SimpleNamespace as NS
 
-import httpx
 import pytest
 
 from commbadge.speakers import (
@@ -130,79 +130,6 @@ def test_wav_rejects_wrong_format_truncation_and_silence(tmp_path):
     path.write_bytes(pcm_wav(bytes(BPS * 4)))
     with pytest.raises(ValueError, match="silent"):
         load_references([f"Edmon={path}"])
-
-
-def test_http_multipart_contract_and_raw_transcript_excluded():
-    async def scenario():
-        async def handler(request):
-            body = (await request.aread()).decode("latin1")
-            assert request.url == "https://api.openai.com/v1/audio/transcriptions"
-            assert request.headers["authorization"] == "Bearer secret"
-            for value in [
-                "gpt-4o-transcribe-diarize",
-                "diarized_json",
-                "chunking_strategy",
-                "known_speaker_names[]",
-                "known_speaker_references[]",
-                "data:audio/wav;base64,",
-                "Edmon",
-                "RIFF",
-            ]:
-                assert value in body
-            return httpx.Response(200, json=payload((0, 1, "Edmon")))
-
-        transcriber = Transcriber(
-            "secret",
-            (Reference("Edmon", pcm_wav(PCM * 4)),),
-            transport=httpx.MockTransport(handler),
-        )
-        assert await transcriber.analyze(PCM) == [Segment(0, 1, "Edmon")]
-
-    asyncio.run(scenario())
-
-
-@pytest.mark.parametrize("status", [401, 403, 429, 500])
-def test_api_errors_do_not_expose_remote_body(status):
-    async def scenario():
-        async def handler(request):
-            return httpx.Response(status, text="secret or private speech")
-
-        client = Transcriber("secret", (), transport=httpx.MockTransport(handler))
-        with pytest.raises(SpeakerAPIError) as caught:
-            await client.analyze(PCM)
-        assert "secret" not in str(caught.value)
-        assert caught.value.status == status
-
-    asyncio.run(scenario())
-
-
-def test_response_size_and_http_cancellation():
-    async def scenario():
-        async def handler(request):
-            return httpx.Response(200, content=b" " * 262145)
-
-        client = Transcriber("secret", (), transport=httpx.MockTransport(handler))
-        with pytest.raises(ValueError, match="size limit"):
-            await client.analyze(PCM)
-        entered = asyncio.Event()
-        cancelled = asyncio.Event()
-
-        async def stalled(request):
-            entered.set()
-            try:
-                await asyncio.Event().wait()
-            finally:
-                cancelled.set()
-
-        client.transport = httpx.MockTransport(stalled)
-        task = asyncio.create_task(client.analyze(PCM))
-        await entered.wait()
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        assert cancelled.is_set()
-
-    asyncio.run(scenario())
 
 
 def test_window_offsets_latest_wins_and_bounded_buffer():
@@ -512,26 +439,6 @@ def test_maximum_reference_stays_below_multipart_part_limit(tmp_path):
         assert wav.getnframes() / wav.getframerate() == 4
 
 
-def test_total_api_deadline_cancels_stalled_http(monkeypatch):
-    monkeypatch.setattr("commbadge.speakers.REQUEST_TIMEOUT", 0.01)
-
-    async def scenario():
-        cancelled = asyncio.Event()
-
-        async def handler(request):
-            try:
-                await asyncio.Event().wait()
-            finally:
-                cancelled.set()
-
-        client = Transcriber("secret", (), transport=httpx.MockTransport(handler))
-        with pytest.raises(TimeoutError):
-            await client.analyze(PCM)
-        assert cancelled.is_set()
-
-    asyncio.run(scenario())
-
-
 def test_three_transient_failures_disable_without_stopping_voice(monkeypatch):
     async def scenario():
         reports = asyncio.Queue()
@@ -556,5 +463,120 @@ def test_three_transient_failures_disable_without_stopping_voice(monkeypatch):
         assert tracker.disabled
         assert attempts == 3
         await cancel(task)
+
+    asyncio.run(scenario())
+
+
+def test_http_worker_multipart_contract_and_raw_transcript_excluded(monkeypatch):
+    import base64
+
+    from commbadge.speaker_http import request
+
+    def open_request(req, timeout):
+        assert req.full_url == "https://api.openai.com/v1/audio/transcriptions"
+        assert req.get_header("Authorization") == "Bearer secret"
+        assert timeout == 8
+        body = req.data.decode("latin1")
+        for value in [
+            "gpt-4o-transcribe-diarize",
+            "diarized_json",
+            "chunking_strategy",
+            "known_speaker_names[]",
+            "known_speaker_references[]",
+            "data:audio/wav;base64,",
+            "Edmon",
+            "RIFF",
+        ]:
+            assert value in body
+        return io.BytesIO(json.dumps(payload((0, 1, "Edmon"))).encode())
+
+    monkeypatch.setattr(
+        "commbadge.speaker_http.urllib.request.build_opener", lambda *args: NS(open=open_request)
+    )
+    result = request(
+        {
+            "api_key": "secret",
+            "audio": base64.b64encode(pcm_wav(PCM)).decode(),
+            "references": [{"name": "Edmon", "audio": base64.b64encode(pcm_wav(PCM * 4)).decode()}],
+        }
+    )
+    assert parse_segments(result["result"], {"Edmon"}, 1) == [Segment(0, 1, "Edmon")]
+
+
+@pytest.mark.parametrize("status", [401, 403, 429, 500])
+def test_http_worker_errors_do_not_expose_remote_body(monkeypatch, status):
+    import urllib.error
+
+    from commbadge.speaker_http import request
+
+    def fail(*args, **kwargs):
+        raise urllib.error.HTTPError(
+            "https://api.openai.com", status, "secret speech", {}, io.BytesIO(b"secret")
+        )
+
+    monkeypatch.setattr(
+        "commbadge.speaker_http.urllib.request.build_opener", lambda *args: NS(open=fail)
+    )
+    result = request({"api_key": "secret", "audio": "AA==", "references": []})
+    assert result == {"status": status}
+
+
+def test_http_worker_bounds_response_size(monkeypatch):
+    from commbadge.speaker_http import request
+
+    monkeypatch.setattr(
+        "commbadge.speaker_http.urllib.request.build_opener",
+        lambda *args: NS(open=lambda *a, **kw: io.BytesIO(b" " * 262145)),
+    )
+    assert request({"api_key": "secret", "audio": "AA==", "references": []}) == {
+        "error": "oversized_response"
+    }
+
+
+def test_request_worker_receives_key_over_stdin_only_and_parses_labels():
+    import sys
+
+    code = (
+        "import sys,json; p=json.load(sys.stdin); assert p['api_key']=='secret'; "
+        "assert 'secret' not in str(sys.argv); print(json.dumps({'result':"
+        + repr(payload((0, 1, "Edmon")))
+        + "}))"
+    )
+
+    async def scenario():
+        client = Transcriber(
+            "secret",
+            (Reference("Edmon", pcm_wav(PCM * 4)),),
+            worker_command=[sys.executable, "-c", code],
+        )
+        assert await client.analyze(PCM) == [Segment(0, 1, "Edmon")]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("cancel_request", [True, False], ids=["cancel", "deadline"])
+def test_request_worker_is_killed_on_cancellation_or_deadline(
+    tmp_path, monkeypatch, cancel_request
+):
+    import os
+    import sys
+
+    marker = tmp_path / "worker.pid"
+    code = f"import os,time,pathlib; pathlib.Path({str(marker)!r}).write_text(str(os.getpid())); time.sleep(30)"
+    monkeypatch.setattr("commbadge.speakers.REQUEST_TIMEOUT", 5 if cancel_request else 0.3)
+
+    async def scenario():
+        client = Transcriber("secret", (), worker_command=[sys.executable, "-c", code])
+        task = asyncio.create_task(client.analyze(PCM))
+        if cancel_request:
+            async with asyncio.timeout(3):
+                while not marker.exists():
+                    await asyncio.sleep(0.01)
+            task.cancel()
+        with pytest.raises(asyncio.CancelledError if cancel_request else TimeoutError):
+            await task
+        if marker.exists():
+            with pytest.raises(ProcessLookupError):
+                os.kill(int(marker.read_text()), 0)
 
     asyncio.run(scenario())

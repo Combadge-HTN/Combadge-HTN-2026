@@ -17,7 +17,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.12.17"
-      - run: uv sync --locked --extra dev --extra voice --extra images --extra speakers
+      - run: uv sync --locked --extra dev --extra voice --extra images
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync ruff format --check .
       - run: uv run --no-sync pytest -vv -o faulthandler_timeout=30
