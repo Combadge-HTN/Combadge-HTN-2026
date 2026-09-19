@@ -10,6 +10,7 @@ import subprocess
 from importlib.metadata import version
 from pathlib import Path
 
+from commbadge.capture import COSMIC_SCREENSHOT, SnapshotCapture
 from commbadge.config import load_settings
 from commbadge.vision import DEFAULT_QUESTION, ImageInput
 
@@ -49,10 +50,30 @@ def main(argv: list[str] | None = None) -> int:
     voice.add_argument("--no-captions", action="store_true", help="hide transcript output")
     voice.add_argument("--image", type=Path, help="send a JPEG, PNG, or WebP to the vision backend")
     voice.add_argument("--question", help="question about --image (default: describe the image)")
+    snapshots = voice.add_mutually_exclusive_group()
+    snapshots.add_argument(
+        "--screenshots", action="store_true", help="enable voice-triggered COSMIC screenshots"
+    )
+    snapshots.add_argument(
+        "--snapshot-command", help="image capture helper with {directory} placeholder (no shell)"
+    )
     args = parser.parse_args(argv)
 
     image = None
+    snapshot_capture = None
     if args.command == "voice":
+        if args.screenshots or args.snapshot_command:
+            if args.check or args.list_devices:
+                parser.error(
+                    "snapshot tools require a voice session, not --check or --list-devices"
+                )
+            try:
+                snapshot_capture = SnapshotCapture(
+                    COSMIC_SCREENSHOT if args.screenshots else shlex.split(args.snapshot_command)
+                )
+                snapshot_capture.preflight()
+            except ValueError as error:
+                parser.error(str(error))
         if args.question is not None and args.image is None:
             parser.error("--question requires --image")
         if args.image is not None:
@@ -108,6 +129,7 @@ def main(argv: list[str] | None = None) -> int:
                     if args.capture_command
                     else None,
                     image=image,
+                    snapshot_capture=snapshot_capture,
                     playback_command=shlex.split(args.playback_command)
                     if args.playback_command
                     else None,

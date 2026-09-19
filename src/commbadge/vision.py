@@ -36,10 +36,10 @@ class ImageInput:
             data = source.read(MAX_IMAGE_BYTES + 1)
         return cls.from_bytes(data, question)
 
-    def event(self) -> dict:
+    def event(self, *, event_id: str = "image_input") -> dict:
         return {
             "type": "response.item.create",
-            "event_id": "image_input",
+            "event_id": event_id,
             "item": {
                 "type": "message",
                 "role": "user",

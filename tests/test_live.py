@@ -297,6 +297,68 @@ def test_incomplete_image_backend_fails_and_finalizes():
     asyncio.run(scenario())
 
 
+def test_snapshot_capture_does_not_block_audio_receiver():
+    async def scenario():
+        stop, capturing, release, played = (asyncio.Event() for _ in range(4))
+
+        class SlowCapture:
+            async def capture(self, question):
+                capturing.set()
+                await release.wait()
+                return ImageInput.from_bytes(b"\x89PNG\r\n\x1a\nencoded", question)
+
+        class PlayingAudio(FakeAudio):
+            async def write(self, data):
+                self.output.append(data)
+                played.set()
+
+        class ContinuingConnection(FakeConnection):
+            async def send(self, message):
+                await super().send(message)
+                if message["type"] == "response.create":
+                    stop.set()
+
+        connection = ContinuingConnection(
+            [
+                backend_event("response.created", response=NS(id="r1")),
+                backend_event(
+                    "response.output_item.done",
+                    item=NS(
+                        type="function_call",
+                        call_id="c1",
+                        name="capture_snapshot",
+                        arguments='{"question":"Look at this"}',
+                    ),
+                ),
+                backend_event("response.completed", response=NS(id="r1", output=[])),
+                audio_event(b"\x01\x00" * (FRAME_BYTES // 2)),
+            ]
+        )
+        task = asyncio.create_task(
+            run_session(
+                connection,
+                PlayingAudio(stop),
+                Settings(),
+                stop,
+                snapshot_capture=SlowCapture(),
+                report=lambda _: None,
+            )
+        )
+        try:
+            await asyncio.wait_for(capturing.wait(), 1)
+            await asyncio.wait_for(played.wait(), 1)
+            release.set()
+            stats = await asyncio.wait_for(task, 1)
+            assert stats.finalized
+            types = [m["type"] for m in connection.messages]
+            assert types.count("response.item.create") == 2
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("complete", [True, False])
 def test_image_check_cannot_pass_on_early_speech_or_backend_text_alone(complete):
     async def scenario():

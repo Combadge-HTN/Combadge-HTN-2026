@@ -63,7 +63,27 @@ commbadge voice --check --image /path/to/image.png --question 'Describe this ima
 
 The image check defaults to 45 seconds and finishes when backend analysis completes and non-silent audio arrives afterward. It checks the API path, not answer accuracy, complete speech, or physical playback. Timings report backend completion and first non-silent audio received after completion, measured from image submission; acknowledgments can affect the audio measurement. Use a spoken conversation to verify the answer itself.
 
-The camera integration boundary is `ImageInput.from_bytes(encoded_image, question)` in `src/commbadge/vision.py`. It accepts the same encoded image bytes as file input. Camera capture and voice-triggered capture tools remain to be implemented.
+The camera integration boundary is `ImageInput.from_bytes(encoded_image, question)` in `src/commbadge/vision.py`. It accepts the same encoded image bytes as file input.
+
+## Voice-triggered capture
+
+Enable a capture helper, then say **“Hey, look at this”** or **“Take another picture and tell me what you see.”** The agent requests a fresh snapshot, the application captures it, and the vision backend returns findings to the spoken conversation. Follow-up questions can use the last image.
+
+For a device camera, add this option to the voice command:
+
+```sh
+--snapshot-command '/path/to/camera-helper --output-dir {directory}'
+```
+
+The helper must write exactly one JPEG, PNG, or WebP into `{directory}` and exit. The application supplies a fresh temporary directory, reads the image, and removes that directory. Commands run without a shell; the model cannot choose executable paths or filenames. A QNX camera helper is still required.
+
+For COSMIC screen capture:
+
+```sh
+commbadge voice --screenshots
+```
+
+This uses `cosmic-screenshot` through the desktop screenshot portal. Allow its screen-capture permission prompt if shown. Each requested screenshot is sent to OpenAI for analysis. Capture is opt-in for the session; it is not continuous recording. Capture failures are returned to the assistant, and capture helpers time out after 30 seconds. `--screenshots` and `--snapshot-command` are mutually exclusive and require a voice session rather than `--check`.
 
 ## Configuration
 
@@ -76,7 +96,7 @@ The camera integration boundary is `ImageInput.from_bytes(encoded_image, questio
 | `BROWSERBASE_API_KEY` | Unset | Reserved for browser integration |
 | `BROWSERBASE_PROJECT_ID` | Unset | Reserved for browser integration |
 
-The client uses the GPT-Live WebSocket protocol with Responses delegation. External action tools are not registered yet. Voice sessions and delegated inference incur separate charges.
+The client uses the GPT-Live WebSocket protocol with Responses delegation. Enabling capture registers the `capture_snapshot` tool; browser and commerce actions are not implemented yet. Voice sessions and delegated inference incur separate charges.
 
 ## Documentation
 

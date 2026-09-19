@@ -47,3 +47,18 @@ def test_question_without_image_is_rejected():
     with pytest.raises(SystemExit) as error:
         main(["voice", "--question", "What is this?"])
     assert error.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--screenshots", "--check"],
+        ["--snapshot-command", "capture-without-output-placeholder"],
+        ["--screenshots", "--snapshot-command", "capture {directory}"],
+    ],
+)
+def test_invalid_snapshot_options_fail_before_connecting(args):
+    with patch("commbadge.live.connect_voice") as connect, pytest.raises(SystemExit) as error:
+        main(["voice", *args])
+    assert error.value.code == 2
+    connect.assert_not_called()
