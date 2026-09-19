@@ -337,7 +337,10 @@ class SipCall:
                 if loop.time() - last_received > 20:
                     raise RuntimeError("No authenticated phone audio for 20 seconds")
                 try:
-                    frame = await asyncio.wait_for(playback.get(), 0.1)
+                    # Keep the queue wait in this task: Python 3.11 wait_for can
+                    # swallow cancellation when its child finishes concurrently.
+                    async with asyncio.timeout(0.1):
+                        frame = await playback.get()
                 except TimeoutError:
                     continue
                 await audio.write(frame)
