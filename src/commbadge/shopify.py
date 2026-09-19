@@ -366,7 +366,7 @@ class ShoppingSession:
         if self.open_checkout:
             try:
                 opened = bool(await asyncio.to_thread(self.opener, url))
-            except (OSError, webbrowser.Error):
+            except OSError, webbrowser.Error:
                 pass
         return {
             "status": "checkout_opened" if opened else "checkout_link_ready",

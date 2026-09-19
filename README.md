@@ -4,7 +4,7 @@ A wearable voice assistant named **Computer** for Raspberry Pi 5 running QNX 8.0
 
 ## Requirements
 
-- QNX 8.0 on Raspberry Pi 5 (aarch64le), with Python 3.11+ and pip.
+- QNX 8.0 on Raspberry Pi 5 (aarch64le), with Python 3.14 and pip.
 - Network access to OpenAI and an `OPENAI_API_KEY`.
 - QNX audio drivers and capture/playback helpers implementing the [PCM interface](docs/QNX.md#audio-interface).
 
@@ -15,6 +15,7 @@ The voice client and command transport are implemented. Native QNX audio helpers
 From the repository root on the Pi:
 
 ```sh
+python3 --version  # Must be Python 3.14.x
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --require-hashes -r requirements-voice.txt

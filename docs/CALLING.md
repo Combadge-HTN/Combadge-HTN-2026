@@ -31,7 +31,7 @@ client additionally authenticates every SRTP packet and checks for replay.
 
 ## Badge configuration
 
-The runtime needs Python 3.11+, Python's `ssl` and `ctypes` modules, and system
+The runtime needs Python 3.14, Python's `ssl` and `ctypes` modules, and system
 OpenSSL (`libcrypto.so.3` or `libcrypto.so`). AES uses OpenSSL; no native Python
 crypto wheel or SIP SDK is required. Existing microphone/speaker helpers still
 supply 20 ms mono PCM16LE frames at 24 kHz. The badge converts to/from G.711 PCMU
