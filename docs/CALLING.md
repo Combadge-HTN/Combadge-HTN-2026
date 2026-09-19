@@ -8,6 +8,13 @@ the command exits; the assistant does not restart automatically. Start a new voi
 session explicitly when you want the assistant again. The standalone `call`
 command needs no OpenAI key.
 
+Before closing, the assistant receives a tool result confirming that the handoff
+was requested (not that the call was placed). The client submits all pending tool
+results and continues the backend response, avoiding a wait for missing results
+during shutdown. Dialing still requires OpenAI's `session.closed` acknowledgment;
+if finalization fails, no call is placed. Only the subsequent WebSocket closing
+handshake has a short timeout.
+
 ## Architecture
 
 Badge PCM helpers ↔ Python client ↔ authenticated WSS relay ↔ Twilio ↔ telephone.

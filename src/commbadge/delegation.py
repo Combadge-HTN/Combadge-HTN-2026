@@ -46,8 +46,10 @@ class SnapshotDelegation:
         *,
         shopping: ShoppingSession | None = None,
         call_handler=None,
+        on_tools_submitted: Callable[[], None] | None = None,
     ):
         self.call_handler = call_handler
+        self.on_tools_submitted = on_tools_submitted
         self.connection = connection
         self.capture = capture
         self.shopping = shopping
@@ -168,3 +170,5 @@ class SnapshotDelegation:
                     self.report("\nImage sent for analysis.\n")
             # Every function output in this response must be submitted before continuing.
             await self.connection.send({"type": "response.create"})
+            if self.on_tools_submitted is not None:
+                self.on_tools_submitted()

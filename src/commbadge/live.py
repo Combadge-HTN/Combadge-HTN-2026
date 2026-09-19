@@ -300,16 +300,24 @@ async def run_session(
             if contact not in call_names:
                 raise ValueError("Unknown contact")
             stats.phone_contact = contact
+            # Complete the tool exchange before closing so the server doesn't wait
+            # for a missing result. Dialing still requires confirmed finalization.
+            return {"status": "handoff_requested", "contact": contact, "dialed": False}
+
+    def tools_submitted():
+        if stats.phone_contact is not None:
             call_requested.set()
-            # The supervisor finalizes Live and cancels this worker before dialing.
-            # Never submit a fabricated call result or restart the delegation.
-            await asyncio.Future()
 
     if shopping is not None:
         shopping.image = image
     snapshots = (
         SnapshotDelegation(
-            connection, snapshot_capture, report, shopping=shopping, call_handler=call_handler
+            connection,
+            snapshot_capture,
+            report,
+            shopping=shopping,
+            call_handler=call_handler,
+            on_tools_submitted=tools_submitted,
         )
         if snapshot_capture is not None or shopping is not None or call_handler is not None
         else None
@@ -560,7 +568,9 @@ async def connect_voice(
             LIVE_URL,
             additional_headers={"Authorization": f"Bearer {settings.openai_api_key}"},
             open_timeout=15,
-            close_timeout=5,
+            # Session finalization has its own confirmed acknowledgment and timeout.
+            # Bound only the redundant WebSocket closing handshake here.
+            close_timeout=0.25,
             max_size=1_048_576,
             max_queue=16,
         ) as websocket:

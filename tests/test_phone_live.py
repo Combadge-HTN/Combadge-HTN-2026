@@ -30,7 +30,7 @@ def call_events():
 
 
 @pytest.mark.parametrize("acknowledge_close", [True, False])
-def test_call_request_finalizes_live_without_returning_fake_tool_result(
+def test_call_request_completes_tool_exchange_before_finalizing_live(
     monkeypatch, acknowledge_close
 ):
     async def scenario():
@@ -60,13 +60,28 @@ def test_call_request_finalizes_live_without_returning_fake_tool_result(
             with pytest.raises(RuntimeError, match="finalization was not confirmed"):
                 await task
         assert connection.closed and audio.closed
-        assert not any(m["type"] == "response.create" for m in connection.messages)
-        assert not any(m["type"] == "response.item.create" for m in connection.messages)
+        exchange = [
+            m
+            for m in connection.messages
+            if m["type"] in ("response.item.create", "response.create", "session.close")
+        ]
+        assert [m["type"] for m in exchange] == [
+            "response.item.create",
+            "response.create",
+            "session.close",
+        ]
+        assert exchange[0]["item"]["call_id"] == "c1"
+        assert json.loads(exchange[0]["item"]["output"]) == {
+            "status": "handoff_requested",
+            "contact": "alex",
+            "dialed": False,
+        }
 
     asyncio.run(scenario())
 
 
-def test_voice_disconnects_before_dialing_and_never_reconnects(monkeypatch):
+@pytest.mark.parametrize("acknowledge_close", [True, False])
+def test_voice_disconnects_before_dialing_and_never_reconnects(monkeypatch, acknowledge_close):
     async def scenario():
         import websockets.asyncio.client
 
@@ -74,7 +89,10 @@ def test_voice_disconnects_before_dialing_and_never_reconnects(monkeypatch):
         from commbadge.phone import client
 
         sequence = []
-        connection = FakeConnection(call_events())
+        connection = FakeConnection(call_events(), acknowledge_close=acknowledge_close)
+
+        async def fast_session(*args, **kwargs):
+            return await run_session(*args, **kwargs, close_timeout=0.01)
 
         class Audio(FakeAudio):
             def __init__(self, *_):
@@ -119,10 +137,11 @@ def test_voice_disconnects_before_dialing_and_never_reconnects(monkeypatch):
             return {"status": "completed", "contact": contact}
 
         monkeypatch.setattr(live, "AlsaAudio", Audio)
+        monkeypatch.setattr(live, "run_session", fast_session)
         monkeypatch.setattr(websockets.asyncio.client, "connect", lambda *a, **kw: Context())
         monkeypatch.setattr(client, "contacts", names)
         monkeypatch.setattr(client, "call_contact", phone)
-        stats = await connect_voice(
+        session = connect_voice(
             Settings(),
             check=False,
             input_device="default",
@@ -131,6 +150,12 @@ def test_voice_disconnects_before_dialing_and_never_reconnects(monkeypatch):
             captions=False,
             phone_settings=PhoneSettings("wss://example.com", "x" * 32),
         )
+        if not acknowledge_close:
+            with pytest.raises(RuntimeError, match="finalization was not confirmed"):
+                await session
+            assert sequence == ["openai-open", "audio-start", "audio-close", "openai-closed"]
+            return
+        stats = await session
         assert stats.finalized
         assert sequence == [
             "openai-open",
