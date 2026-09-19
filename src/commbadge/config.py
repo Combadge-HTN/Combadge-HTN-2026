@@ -12,6 +12,9 @@ class Settings:
     openai_api_key: str = field(default="", repr=False)
     browserbase_api_key: str = field(default="", repr=False)
     browserbase_project_id: str = field(default="", repr=False)
+    live_model: str = "gpt-live-1"
+    live_voice: str = "marin"
+    backend_model: str = "gpt-5.6-luna"
 
 
 def load_settings(env_file: Path = Path(".env")) -> Settings:
@@ -25,4 +28,7 @@ def load_settings(env_file: Path = Path(".env")) -> Settings:
         openai_api_key=value("OPENAI_API_KEY"),
         browserbase_api_key=value("BROWSERBASE_API_KEY"),
         browserbase_project_id=value("BROWSERBASE_PROJECT_ID"),
+        live_model=value("OPENAI_LIVE_MODEL") or "gpt-live-1",
+        live_voice=value("OPENAI_LIVE_VOICE") or "marin",
+        backend_model=value("OPENAI_BACKEND_MODEL") or "gpt-5.6-luna",
     )

@@ -2,9 +2,11 @@
 
 Updated September 19, 2026 from the team's equipment list. Audio and hardware execution have not yet been tested.
 
+**OS update:** the Pi runs QNX OS. Linux ALSA commands elsewhere in the starter apply to the development laptop only. Use [QNX integration notes](QNX.md) to establish the Pi's audio support. USB audio support on Linux does not establish driver support on QNX.
+
 | Part | Role | What remains to check |
 | --- | --- | --- |
-| Raspberry Pi 5 development kit | Device compute and network | Installed OS, power supply, cooling, and SSH access |
+| Raspberry Pi 5 development kit, QNX OS | Device compute and network | Exact QNX image/BSP, Python version, audio drivers, power, cooling, and SSH access |
 | LilyPad SimpleSnap Protoboard | Sewable connection/prototyping board | Whether the separate Arduino SimpleSnap controller is also present |
 | Raspberry Pi camera | Later image input | Exact model and Pi 5-compatible ribbon cable |
 | Speaker with 3.5 mm plug | Voice output | Whether it is powered/amplified; exact plug and power requirements |
@@ -42,4 +44,4 @@ Sources: [SparkFun wearable Arduino comparison](https://learn.sparkfun.com/tutor
 
 ## Immediate completion criterion
 
-On the Pi, list audio devices, record five seconds of speech, then play the recording through the intended output using `scripts/audio_check.py`. Check intelligibility, distortion, and output volume. Only after this passes should the voice client be connected to GPT-Live. This avoids debugging audio hardware and the cloud API at the same time.
+On the QNX Pi, first identify its supported audio framework and record/play speech using that framework's utilities or a native helper. Check intelligibility, distortion, and output volume. The unchanged `scripts/audio_check.py` can perform an equivalent bench test on the Linux laptop, but cannot be used as a QNX driver. The laptop GPT-Live voice loop can be developed in parallel.

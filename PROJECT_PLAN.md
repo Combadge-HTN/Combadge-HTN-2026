@@ -2,6 +2,8 @@
 
 Planning baseline: September 19, 2026. This is a proposed implementation plan, not a working prototype.
 
+Implementation update: the Python GPT-Live client now runs on the Linux development laptop. The team confirmed **QNX OS on the Pi 5**. Native QNX execution is not yet validated; see [QNX prerequisites and audio interface](docs/QNX.md). Earlier Linux/Pi OS suggestions below are superseded by this target decision.
+
 Hardware update: the team identified a **LilyPad SimpleSnap Protoboard**, a Raspberry Pi camera, a speaker with a 3.5 mm plug, and a SparkFun Sound Detector. The protoboard is not itself the Arduino controller; any LilyPad firmware/control role below depends on having the separate controller. The detector supplies analog audio, requiring an audio interface before the Pi can record it. See [current hardware notes](docs/HARDWARE.md). The starter now includes local audio diagnostics; cloud integrations remain unimplemented.
 
 ## Product and MVP
@@ -31,7 +33,7 @@ flowchart LR
     Backend -. optional .-> Other[Composio / Baseten / Warp]
 ```
 
-Selected stack: Python for both the device process on Raspberry Pi OS and backend tool integrations. The application package lives under `src/commbadge`, with dependencies and developer tooling in `pyproject.toml`. The existing `scripts/audio_check.py` remains a standalone tool. Run backend locally on a laptop initially if that shortens setup.
+Selected language: Python for voice/session logic and backend tool integrations. Develop on the Linux laptop; the Pi target is QNX, requiring verified Python/SDK ports and native audio helpers before running the same application there. The package lives under `src/commbadge`, dependencies in `pyproject.toml` and `uv.lock`. The existing `scripts/audio_check.py` remains a standalone Linux tool.
 
 OpenAI currently documents GPT-Live separately from the Realtime API. Its examples use `gpt-live-1`; account access has not been tested. For a native device, use the primary Live WebSocket, with raw mono PCM16 at 24 kHz as in the official example. Start with Responses delegation for the first tool flow. Client delegation can later attach a custom agent or Baseten-backed inference, but requires the application to maintain context and orchestrate results. Do not mix Live session events with older Realtime examples.
 
