@@ -66,7 +66,13 @@ audio devices (this does not verify the SIP password or media path):
 commbadge call --check
 ```
 
-Call with the hardware team's QNX PCM helpers:
+With the QNX `arecord`/`aplay` ports and audio devices connected:
+
+```sh
+commbadge call edmon
+```
+
+For custom PCM helpers:
 
 ```sh
 commbadge call edmon --audio-backend commands \
@@ -106,7 +112,7 @@ Tests cover SIP digest authentication, message framing, secure SDP, SRTP referen
 vectors, replay/tampering rejection, packet rollover, direct two-way audio with a
 simulated carrier, and cancellation/answer races. Direct TLS/SIP and encrypted
 synthetic audio have also been exercised on QNX 8 with Python 3.14. Physical audio
-acceptance still requires the microphone, speaker, and native helpers on the Pi.
+acceptance still requires a call through the physical microphone and speaker on the Pi.
 
 The former relay transport remains available with `CALL_TRANSPORT=relay`; its
 setup is documented in [CALLING_RELAY.md](CALLING_RELAY.md). It is optional.
