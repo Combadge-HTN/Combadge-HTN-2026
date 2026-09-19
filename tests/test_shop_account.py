@@ -97,8 +97,8 @@ def test_transient_auth_failure_does_not_refresh_or_delete_tokens(tmp_path):
     assert send.call_count == 1 and store.read() == saved
 
 
-def test_prepare_wire_only_creates_unpaid_checkout_with_merchant_scoped_token():
-    account = ShopAccount()
+def test_prepare_wire_only_creates_unpaid_checkout_with_merchant_scoped_token(tmp_path):
+    account = ShopAccount(TokenStore(tmp_path / "auth.json"))
     with (
         patch.object(account, "access_token", return_value="account-token"),
         patch(
@@ -139,8 +139,8 @@ def test_invalid_merchant_never_receives_credentials(domain):
     send.assert_not_called()
 
 
-def test_ambiguous_create_failure_is_not_retried():
-    account = ShopAccount()
+def test_ambiguous_create_failure_is_not_retried(tmp_path):
+    account = ShopAccount(TokenStore(tmp_path / "auth.json"))
     with (
         patch.object(account, "access_token", return_value="account-token"),
         patch(
@@ -151,7 +151,7 @@ def test_ambiguous_create_failure_is_not_retried():
                 ShopError("timeout"),
             ],
         ) as send,
-        pytest.raises(ShopError, match="Check your Shop app before trying again"),
+        pytest.raises(ShopError, match="Check before trying again"),
     ):
         account.prepare("bottles.myshopify.com", VID, 1, "CA")
     assert send.call_count == 3
@@ -269,3 +269,97 @@ def test_delivery_errors_are_not_mistaken_for_interactive_review():
     )
     with pytest.raises(ShopError):
         checkout_summary(data, VID, 1)
+
+
+def test_checkout_trace_retains_retrieval_evidence_without_buyer_or_payment_data(tmp_path):
+    account = ShopAccount(TokenStore(tmp_path / "auth.json"))
+    response = envelope()
+    response["result"]["structuredContent"]["continue_url"] = (
+        "https://bottles.myshopify.com/checkout/private-handoff"
+    )
+    with (
+        patch.object(account, "_merchant_access", return_value=("private-token", "203.0.113.10")),
+        patch("commbadge.shop_account.request", return_value=response),
+    ):
+        result = account.prepare("bottles.myshopify.com", VID, 1, "CA")
+    assert result["app_visibility"] == "unverified"
+    assert "NOT been verified" in result["message"]
+    path = account.trace_dir / f"{result['trace_id']}.json"
+    assert path.stat().st_mode & 0o777 == 0o600
+    saved = json.loads(path.read_text())
+    assert saved["response"]["checkout_id"] == "checkout-1"
+    assert saved["response"]["continue_url"].endswith("private-handoff")
+    assert saved["response"]["checkout_status"] == "requires_escalation"
+    assert saved["response"]["totals_minor"]["total"] == 30660
+    assert saved["response"]["line_items"] == [{"variant_id": VID, "quantity": 1}]
+    for secret in ("private@example.com", "private-payment", "private-token"):
+        assert secret not in path.read_text()
+    public = json.dumps(account.traces())
+    assert "private-handoff" not in public and '"checkout_id"' not in public
+
+
+def test_trace_records_uncertain_outcome_and_does_not_repeat_create(tmp_path):
+    account = ShopAccount(TokenStore(tmp_path / "auth.json"))
+    with (
+        patch.object(account, "_merchant_access", return_value=("token", "203.0.113.10")),
+        patch("commbadge.shop_account.request", side_effect=ShopError("timeout")) as send,
+    ):
+        with pytest.raises(ShopError, match="Trace:"):
+            account.prepare("bottles.myshopify.com", VID, 1, "CA")
+    assert send.call_count == 1
+    trace = account.traces()[0]
+    assert trace["stage"] == "failed"
+    assert trace["failed_stage"] == "requesting_checkout"
+    assert trace["app_visibility"] == "unverified"
+
+
+def test_trace_records_merchant_errors_even_when_summary_rejects_response(tmp_path):
+    account = ShopAccount(TokenStore(tmp_path / "auth.json"))
+    response = envelope()
+    response["result"]["structuredContent"]["messages"] = [
+        {"type": "error", "code": "delivery_no_delivery_available"}
+    ]
+    with (
+        patch.object(account, "_merchant_access", return_value=("token", "203.0.113.10")),
+        patch("commbadge.shop_account.request", return_value=response),
+    ):
+        with pytest.raises(ShopError):
+            account.prepare("bottles.myshopify.com", VID, 1, "CA")
+    trace = account.traces()[0]
+    assert trace["response"]["message_codes"] == ["delivery_no_delivery_available"]
+    assert trace["failed_stage"] == "response_received"
+
+
+def test_refresh_reads_checkout_without_creating_one_and_preserves_original_response(tmp_path):
+    account = ShopAccount(TokenStore(tmp_path / "auth.json"))
+    trace_id = "a" * 32
+    account._write_trace(
+        {
+            "trace_id": trace_id,
+            "merchant": "bottles.myshopify.com",
+            "response": {"checkout_id": "checkout-1", "marker": "original"},
+        }
+    )
+    with (
+        patch.object(account, "_merchant_access", return_value=("token", "203.0.113.10")),
+        patch("commbadge.shop_account.request", return_value=envelope()) as send,
+    ):
+        refreshed = account.traces(trace_id, refresh=True)[0]
+    params = send.call_args.kwargs["payload"]["params"]
+    assert params["name"] == "get_checkout" and params["arguments"]["id"] == "checkout-1"
+    assert refreshed["response"]["marker"] == "original"
+    assert refreshed["last_read"]["checkout_status"] == "requires_escalation"
+    assert "checkout_id" not in refreshed["last_read"]
+
+
+def test_trace_cli_is_offline_unless_refresh_requested(tmp_path, capsys):
+    with patch("commbadge.shop_account.request") as send:
+        assert main(["shop-account", "trace", "--auth-file", str(tmp_path / "auth.json")]) == 0
+    send.assert_not_called()
+    assert json.loads(capsys.readouterr().out) == []
+
+
+def test_voice_never_treats_checkout_creation_as_confirmed_phone_visibility():
+    config = session_config(Settings(), shopping=True, shop_account=True)
+    assert "does NOT" in config["instructions"]
+    assert "app_visibility=unverified" in config["delegation"]["responses"]["instructions"]

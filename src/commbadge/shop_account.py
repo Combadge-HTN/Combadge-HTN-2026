@@ -9,6 +9,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 CLIENT_ID = "5c733ab2-1903-400a-891e-7ba20c09e2a3"
@@ -112,6 +114,70 @@ class TokenStore:
 class ShopAccount:
     def __init__(self, store=None):
         self.store = store if store is not None else TokenStore()
+        self.trace_dir = self.store.path.parent / "shop-traces"
+        self.last_trace_id = None
+
+    def _write_trace(self, trace, **values):
+        trace.update(values)
+        trace["updated_at"] = datetime.now(UTC).isoformat()
+        TokenStore(self.trace_dir / f"{trace['trace_id']}.json").write(trace)
+
+    def traces(self, trace_id=None, *, refresh=False):
+        if trace_id is not None and not re.fullmatch(r"[a-f0-9]{32}", trace_id):
+            raise ValueError("Use a trace ID printed by this app.")
+        if refresh and trace_id is None:
+            raise ValueError("--refresh requires --trace-id.")
+        paths = (
+            [self.trace_dir / f"{trace_id}.json"]
+            if trace_id
+            else sorted(
+                self.trace_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+            )[:10]
+        )
+        traces = []
+        for path in paths:
+            trace = TokenStore(path).read()
+            if not trace:
+                continue
+            if refresh:
+                domain = trace.get("merchant", "")
+                checkout_id = trace.get("response", {}).get("checkout_id")
+                if not DOMAIN.fullmatch(domain) or not isinstance(checkout_id, str):
+                    raise ShopError("This trace has no retrievable merchant checkout ID.")
+                token, buyer_ip = self._merchant_access(domain)
+                envelope = request(
+                    f"https://{domain}/api/ucp/mcp",
+                    token=token,
+                    headers={"Shopify-Buyer-Ip": buyer_ip},
+                    payload={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "get_checkout",
+                            "arguments": {
+                                "meta": {"ucp-agent": {"profile": PROFILE}},
+                                "id": checkout_id,
+                            },
+                        },
+                    },
+                )
+                self._write_trace(
+                    trace,
+                    last_read=checkout_evidence(envelope),
+                    last_read_at=datetime.now(UTC).isoformat(),
+                )
+            # Checkout IDs and continuation URLs can grant checkout access. Keep them on disk.
+            public = dict(trace)
+            for field in ("response", "last_read"):
+                if field in public:
+                    public[field] = {
+                        k: v
+                        for k, v in public[field].items()
+                        if k not in ("checkout_id", "continue_url")
+                    }
+            traces.append(public)
+        return traces
 
     def login(self, report=print):
         device = request(
@@ -195,12 +261,48 @@ class ShopAccount:
             ) from None
 
     def prepare(self, domain, variant_id, quantity, country):
+        self.last_trace_id = None
         if not isinstance(domain, str) or not DOMAIN.fullmatch(domain):
             raise ValueError("This offer has no supported Shopify merchant domain.")
         if not isinstance(variant_id, str) or not VARIANT.fullmatch(variant_id):
             raise ValueError("Choose a specific Shopify variant.")
         if type(quantity) is not int or not 1 <= quantity <= 10 or country not in ("CA", "US"):
             raise ValueError("Quantity must be 1–10 and destination CA or US.")
+        trace = {
+            "trace_id": uuid.uuid4().hex,
+            "started_at": datetime.now(UTC).isoformat(),
+            "operation": "create_checkout",
+            "merchant": domain,
+            "variant_id": variant_id,
+            "quantity": quantity,
+            "country": country,
+            "app_visibility": "unverified",
+        }
+        self.last_trace_id = trace["trace_id"]
+        self._write_trace(trace, stage="authorizing")
+        try:
+            result = self._prepare(domain, variant_id, quantity, country, trace)
+            self._write_trace(trace, stage="checkout_prepared")
+            return {**result, "trace_id": trace["trace_id"]}
+        except (OSError, RuntimeError, ValueError) as error:
+            stage = trace["stage"]
+            self._write_trace(
+                trace,
+                stage="failed",
+                failed_stage=stage,
+                http_status=getattr(error, "status", None),
+            )
+            if stage == "authorizing":
+                raise ShopError(
+                    "Shop authorization failed before checkout creation. "
+                    f"Trace: {self.last_trace_id}"
+                ) from None
+            raise ShopError(
+                "Could not confirm checkout creation. Check before trying again; "
+                f"a checkout may exist. No payment was requested. Trace: {self.last_trace_id}"
+            ) from None
+
+    def _merchant_access(self, domain):
         access = self.access_token()
         exchange = request(
             "https://shop.app/oauth/token",
@@ -219,6 +321,10 @@ class ShopAccount:
             buyer_ip = str(ipaddress.ip_address(request("https://api.ipify.org?format=json")["ip"]))
         except (KeyError, ValueError, TypeError):
             raise ShopError("Could not determine the buyer network address.") from None
+        return merchant_token, buyer_ip
+
+    def _prepare(self, domain, variant_id, quantity, country, trace):
+        merchant_token, buyer_ip = self._merchant_access(domain)
         payload = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -234,29 +340,77 @@ class ShopAccount:
                 },
             },
         }
-        try:
-            envelope = request(
-                f"https://{domain}/api/ucp/mcp",
-                payload=payload,
-                token=merchant_token,
-                headers={"Shopify-Buyer-Ip": buyer_ip},
-            )
-            return checkout_summary(envelope, variant_id, quantity)
-        except ShopError:
-            raise ShopError(
-                "Could not confirm checkout creation. Check your Shop app before trying again; "
-                "a checkout may already exist. No payment was requested."
-            ) from None
+        self._write_trace(trace, stage="requesting_checkout")
+        envelope = request(
+            f"https://{domain}/api/ucp/mcp",
+            payload=payload,
+            token=merchant_token,
+            headers={"Shopify-Buyer-Ip": buyer_ip},
+        )
+        self._write_trace(trace, stage="response_received", response=checkout_evidence(envelope))
+        return checkout_summary(envelope, variant_id, quantity)
+
+
+def checkout_data(envelope):
+    result = envelope["result"]
+    data = result.get("structuredContent")
+    if data is None:
+        data = json.loads(next(c["text"] for c in result["content"] if c["type"] == "text"))
+    return result, data.get("checkout", data)
+
+
+def checkout_evidence(envelope):
+    """Allowlisted diagnostics only: no raw bodies, buyer data, tokens or payment objects."""
+    try:
+        result, checkout = checkout_data(envelope)
+        evidence = {
+            "mcp_error": result.get("isError") is True,
+            "has_checkout_id": bool(checkout.get("id")),
+            "buyer_present": bool(checkout.get("buyer")),
+        }
+        for key, source in (
+            ("checkout_id", "id"),
+            ("checkout_status", "status"),
+            ("currency", "currency"),
+            ("expires_at", "expires_at"),
+        ):
+            value = checkout.get(source)
+            if isinstance(value, str):
+                evidence[key] = value[:1024]
+        continuation = checkout.get("continue_url")
+        if isinstance(continuation, str):
+            url = urllib.parse.urlsplit(continuation)
+            if url.scheme == "https" and url.hostname and not url.username and not url.password:
+                evidence["continue_url"] = continuation[:8192]
+                evidence["continuation_host"] = url.hostname
+        status = checkout.get("ucp", {}).get("status")
+        evidence["ucp_status"] = status if status in ("success", "error") else "unknown"
+        evidence["message_codes"] = [
+            m["code"]
+            for m in checkout.get("messages", [])
+            if isinstance(m.get("code"), str) and re.fullmatch(r"[a-z_]{1,100}", m["code"])
+        ][:30]
+        evidence["line_items"] = [
+            {"variant_id": line["item"]["id"], "quantity": line["quantity"]}
+            for line in checkout.get("line_items", [])
+            if VARIANT.fullmatch(str(line.get("item", {}).get("id", "")))
+            and type(line.get("quantity")) is int
+        ][:20]
+        evidence["totals_minor"] = {
+            total["type"]: total["amount"]
+            for total in checkout.get("totals", [])
+            if total.get("type") in ("subtotal", "fulfillment", "tax", "total", "discount")
+            and type(total.get("amount")) is int
+        }
+        return evidence
+    except (KeyError, ValueError, TypeError, AttributeError, StopIteration):
+        return {"malformed_response": True}
 
 
 def checkout_summary(envelope, variant_id, quantity):
     """Only purchase facts leave this boundary, never buyer or payment information."""
     try:
-        result = envelope["result"]
-        data = result.get("structuredContent")
-        if data is None:
-            data = json.loads(next(c["text"] for c in result["content"] if c["type"] == "text"))
-        checkout = data.get("checkout", data)
+        result, checkout = checkout_data(envelope)
         if not checkout.get("id") or checkout.get("status") not in (
             "incomplete",
             "requires_escalation",
@@ -289,12 +443,16 @@ def checkout_summary(envelope, variant_id, quantity):
                 totals[kind] = amount
         return {
             "status": "checkout_prepared",
+            "app_visibility": "unverified",
+            "merchant_status": checkout["status"],
             "quantity": quantity,
             "currency": currency,
             "totals_minor": totals,
             "shipping_exceeds_items": totals.get("fulfillment", 0) > totals.get("subtotal", 0),
             "review_required": checkout["status"] != "ready_for_complete",
-            "message": "Unpaid checkout prepared in your Shop account. Check the Shop app. "
+            "message": "The merchant created an unpaid checkout using your Shop account. "
+            "Visibility in the Shop app has NOT been verified. "
+            "Do not claim it is in the app or cart. "
             "No payment or order was submitted. Totals may change during final review.",
         }
     except (KeyError, ValueError, TypeError, AttributeError, StopIteration):

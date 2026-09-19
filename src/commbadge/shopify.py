@@ -334,9 +334,20 @@ class ShoppingSession:
             return checked
         offer = checked["offer"]
         self.report("\nPreparing an unpaid checkout in your Shop account…\n")
-        result = await asyncio.to_thread(
-            self.account.prepare, offer["shop_domain"], variant_id, quantity, self.catalog.country
-        )
+        self.report(f"{offer['title']} — {offer['shop_domain']}; quantity {quantity}\n")
+        try:
+            result = await asyncio.to_thread(
+                self.account.prepare,
+                offer["shop_domain"],
+                variant_id,
+                quantity,
+                self.catalog.country,
+            )
+        finally:
+            trace_id = getattr(self.account, "last_trace_id", None)
+            if isinstance(trace_id, str):
+                self.report(f"Shop trace: {trace_id}\n")
+        self.report("Merchant checkout created; Shop app visibility is unverified.\n")
         return {**result, "title": offer["title"], "seller": offer["seller"]}
 
     async def checkout(self, variant_id: str) -> dict:
@@ -440,7 +451,8 @@ SHOP_ACCOUNT_TOOLS = SHOPPING_TOOLS[:2] + [
         "save_shopify_item",
         "Prepare an unpaid checkout in the connected Shop account after the buyer selects "
         "an offer and asks to add it. Rechecks the offer. Does not buy or pay. "
-        "User finishes in the Shop app; different merchants have separate checkouts.",
+        "Creates a merchant checkout only; visibility in the Shop app is unverified. "
+        "Different merchants have separate checkouts.",
         {
             "variant_id": {"type": "string"},
             "quantity": {"type": "integer", "minimum": 1, "maximum": 10},

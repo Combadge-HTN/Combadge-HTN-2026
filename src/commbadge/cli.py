@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     voice.add_argument(
         "--shop-account",
         action="store_true",
-        help="prepare unpaid checkouts in your connected Shop app account",
+        help="prepare merchant checkouts using your connected Shop account",
     )
     voice.add_argument(
         "--shop-auth-file",
@@ -80,8 +80,14 @@ def main(argv: list[str] | None = None) -> int:
         help="private Shop credential file",
     )
     account_parser = commands.add_parser("shop-account", help="connect your personal Shop account")
-    account_parser.add_argument("action", choices=("login", "status", "logout"))
+    account_parser.add_argument("action", choices=("login", "status", "logout", "trace"))
     account_parser.add_argument("--auth-file", type=Path, default=DEFAULT_AUTH_FILE)
+    account_parser.add_argument("--trace-id", help="inspect one recorded checkout attempt")
+    account_parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="read the recorded checkout from its merchant; no mutation",
+    )
     shop = commands.add_parser(
         "shop", help="search Shopify products by description and optional image"
     )
@@ -92,8 +98,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "shop-account":
+        if (args.trace_id or args.refresh) and args.action != "trace":
+            parser.error("--trace-id and --refresh require shop-account trace")
         account = ShopAccount(TokenStore(args.auth_file))
         try:
+            if args.action == "trace":
+                print(json.dumps(account.traces(args.trace_id, refresh=args.refresh), indent=2))
+                return 0
             if args.action == "login":
                 account.login()
             elif args.action == "status":
