@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import os
 import sys
 from pathlib import Path
@@ -29,6 +30,22 @@ def test_capture_uses_fresh_directory_and_removes_image(tmp_path):
     asyncio.run(capture.capture("Look again"))
     assert marker.read_text() != first_directory
     assert not Path(marker.read_text()).exists()
+
+
+def test_saved_snapshots_survive_cleanup_and_match_submitted_bytes(tmp_path):
+    directory = tmp_path / "saved"
+    command = make_helper(
+        tmp_path,
+        "(pathlib.Path(sys.argv[1]) / 'screen.png').write_bytes(b'\\x89PNG\\r\\n\\x1a\\nimage')\n",
+    )
+    capture = SnapshotCapture(command, save_directory=directory)
+    first = asyncio.run(capture.capture("Look"))
+    asyncio.run(capture.capture("Look again"))
+    files = list(directory.glob("*.png"))
+    assert len(files) == 2
+    for saved in files:
+        assert saved.read_bytes() == base64.b64decode(first.data_url.split(",", 1)[1])
+        assert saved.stat().st_mode & 0o777 == 0o600
 
 
 @pytest.mark.parametrize(

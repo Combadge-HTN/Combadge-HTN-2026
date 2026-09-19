@@ -1,11 +1,13 @@
 """Capture a fresh still image with a configured device helper."""
 
 import asyncio
+import base64
 import platform
 import shutil
 from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 
 from combadge.vision import ImageInput
 
@@ -18,7 +20,7 @@ COSMIC_SCREENSHOT = [
 ]
 
 
-def qnx_camera_capture(unit: int = 4) -> SnapshotCapture:
+def qnx_camera_capture(unit: int = 4, *, save_directory: Path | None = None) -> SnapshotCapture:
     """Select the built QNX helper, independent of the current directory."""
     if platform.system() != "QNX":
         raise ValueError("--camera requires the QNX camera helper on the Pi")
@@ -31,14 +33,23 @@ def qnx_camera_capture(unit: int = 4) -> SnapshotCapture:
             raise ValueError("Build the camera helper first: make -C native/qnx-camera")
         executable = str(helper)
     return SnapshotCapture(
-        [executable, "--unit", str(unit), "--output-dir", "{directory}"], source="camera"
+        [executable, "--unit", str(unit), "--output-dir", "{directory}"],
+        source="camera",
+        save_directory=save_directory,
     )
 
 
 class SnapshotCapture:
     """Run a trusted command that writes one encoded image into a fresh directory."""
 
-    def __init__(self, command: list[str], *, timeout: float = 30, source: str = "device"):
+    def __init__(
+        self,
+        command: list[str],
+        *,
+        timeout: float = 30,
+        source: str = "device",
+        save_directory: Path | None = None,
+    ):
         if not command or not any("{directory}" in arg for arg in command):
             raise ValueError("Snapshot command must contain {directory} for its output directory.")
         if source not in ("device", "screen", "camera"):
@@ -46,10 +57,30 @@ class SnapshotCapture:
         self.source = source
         self.command = command
         self.timeout = timeout
+        self.save_directory = save_directory
 
     def preflight(self) -> None:
         if not shutil.which(self.command[0]):
             raise ValueError(f"Snapshot helper is missing: {self.command[0]}")
+
+    def _load_image(self, path: Path, question: str) -> ImageInput:
+        image = ImageInput.from_file(path, question)
+        if self.save_directory is not None:
+            directory = self.save_directory.expanduser().resolve()
+            directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            header, encoded = image.data_url.split(",", 1)
+            suffix = {
+                "data:image/jpeg;base64": ".jpg",
+                "data:image/png;base64": ".png",
+                "data:image/webp;base64": ".webp",
+            }[header]
+            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S-%fZ-")
+            with NamedTemporaryFile(
+                prefix=stamp, suffix=suffix, dir=directory, delete=False
+            ) as saved:
+                saved.write(base64.b64decode(encoded))
+            print(f"\nSnapshot saved: {saved.name}", flush=True)
+        return image
 
     async def capture(self, question: str) -> ImageInput:
         self.preflight()
@@ -84,7 +115,7 @@ class SnapshotCapture:
                 # Decoding/resizing must not block the audio event loop. Keep the directory
                 # alive until the worker finishes, including when the session is cancelled.
                 conversion = asyncio.create_task(
-                    asyncio.to_thread(ImageInput.from_file, files[0], question)
+                    asyncio.to_thread(self._load_image, files[0], question)
                 )
                 try:
                     return await asyncio.shield(conversion)

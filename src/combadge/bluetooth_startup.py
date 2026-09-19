@@ -239,6 +239,8 @@ def run(args):
                     ]
                     if not args.no_camera:
                         command.extend(["--camera", "--camera-unit", str(args.camera_unit)])
+                    if args.save_snapshots is not None:
+                        command.extend(["--save-snapshots", str(args.save_snapshots)])
                 print("Speaker stream ready. Starting test… Ctrl+C stops everything.", flush=True)
                 app = subprocess.Popen(
                     ["sudo", "-u", user, "--", *command],
@@ -296,6 +298,8 @@ def launch(args):
         ]
         if args.no_camera:
             command.append("--no-camera")
+        if args.save_snapshots is not None:
+            command.extend(["--save-snapshots", str(args.save_snapshots.expanduser().resolve())])
         if args.tone:
             command.append("--tone")
         # Replace this process so Ctrl+C reaches the supervisor directly.

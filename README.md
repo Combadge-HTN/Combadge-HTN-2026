@@ -47,6 +47,17 @@ discards playback and displays the transcripts, and still uses API credits.
 The prepared Pi has `~/bin/combadge` linked to this checkout's `.venv/bin/combadge`.
 On a new checkout, activate `.venv` first or run `.venv/bin/combadge start`.
 
+To retain camera images for inspection, run:
+
+```sh
+combadge start --save-snapshots ~/combadge-snapshots
+```
+
+Each capture prints its saved path. Files have unique UTC timestamps and contain
+the encoded image prepared for analysis, including any resizing. They remain
+after the session ends until you delete them. This option also works with
+`start --bluetooth` and `voice --camera`; snapshots are otherwise temporary.
+
 For speaker output through Dan's existing Bluetooth example, turn on the TWS
 Mini Speaker, disconnect it from other devices, and run:
 

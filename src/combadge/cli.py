@@ -79,6 +79,12 @@ def main(argv: list[str] | None = None) -> int:
     voice.add_argument(
         "--camera-unit", type=int, default=None, help="QNX sensor unit for --camera (default: 4)"
     )
+    voice.add_argument(
+        "--save-snapshots",
+        type=Path,
+        metavar="DIRECTORY",
+        help="keep captured images in this directory",
+    )
     snapshots.add_argument(
         "--screenshots", action="store_true", help="enable voice-triggered COSMIC screenshots"
     )
@@ -191,6 +197,10 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--camera-unit requires --camera")
         if args.camera_unit is not None and args.camera_unit < 1:
             parser.error("--camera-unit must be positive")
+        if args.save_snapshots is not None and not (
+            args.camera or args.screenshots or args.snapshot_command
+        ):
+            parser.error("--save-snapshots requires a snapshot capture source")
         if args.camera or args.screenshots or args.snapshot_command:
             if args.check or args.list_devices:
                 parser.error(
@@ -198,13 +208,14 @@ def main(argv: list[str] | None = None) -> int:
                 )
             try:
                 snapshot_capture = (
-                    qnx_camera_capture(args.camera_unit or 4)
+                    qnx_camera_capture(args.camera_unit or 4, save_directory=args.save_snapshots)
                     if args.camera
                     else SnapshotCapture(
                         COSMIC_SCREENSHOT
                         if args.screenshots
                         else shlex.split(args.snapshot_command),
                         source="screen" if args.screenshots else "device",
+                        save_directory=args.save_snapshots,
                     )
                 )
                 snapshot_capture.preflight()

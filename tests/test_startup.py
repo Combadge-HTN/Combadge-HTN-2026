@@ -25,6 +25,16 @@ def test_start_can_disable_camera():
     assert "--camera" not in voice.call_args.args[0]
 
 
+def test_start_forwards_saved_snapshots_as_absolute_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with patch("combadge.startup.launch", return_value=0) as routed:
+        assert main(["start", "--save-snapshots", "images"]) == 0
+    with patch("combadge.cli.main", return_value=0) as voice:
+        launch(routed.call_args.args[0])
+    command = voice.call_args.args[0]
+    assert command[command.index("--save-snapshots") + 1] == str(tmp_path / "images")
+
+
 def test_bluetooth_is_explicit_and_routes_to_the_example():
     with patch("combadge.bluetooth_startup.launch", return_value=0) as bluetooth:
         assert main(["start", "--bluetooth", "--max-seconds", "30"]) == 0

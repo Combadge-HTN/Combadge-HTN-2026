@@ -134,5 +134,5 @@ def test_camera_option_configures_photo_capture(tmp_path):
         patch("combadge.live.connect_voice") as connect,
     ):
         assert main(["voice", "--camera", "--camera-unit", "4", "--env-file", str(env)]) == 0
-    factory.assert_called_once_with(4)
+    factory.assert_called_once_with(4, save_directory=None)
     assert connect.call_args.kwargs["snapshot_capture"].source == "camera"

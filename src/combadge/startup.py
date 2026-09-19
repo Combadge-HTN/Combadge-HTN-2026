@@ -13,6 +13,12 @@ def add_arguments(parser):
     parser.add_argument("--camera-unit", type=int, default=4)
     parser.add_argument("--no-camera", action="store_true")
     parser.add_argument(
+        "--save-snapshots",
+        type=Path,
+        metavar="DIRECTORY",
+        help="keep captured images in this directory",
+    )
+    parser.add_argument(
         "--bluetooth", action="store_true", help="play through Dan's Bluetooth example"
     )
     parser.add_argument("--bluetooth-dir", type=Path, default=ROOT.parent / "qnx-bluetooth")
@@ -47,6 +53,8 @@ def launch(args):
     ]
     if not args.no_camera:
         command.extend(["--camera", "--camera-unit", str(args.camera_unit)])
+    if args.save_snapshots is not None:
+        command.extend(["--save-snapshots", str(args.save_snapshots.expanduser().resolve())])
     print(
         "Starting microphone and camera; replies appear in this console. Ctrl+C stops.", flush=True
     )
