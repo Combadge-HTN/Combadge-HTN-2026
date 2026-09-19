@@ -6,9 +6,9 @@ A wearable voice assistant named **Computer** for Raspberry Pi 5 running QNX 8.0
 
 - QNX 8.0 on Raspberry Pi 5 (aarch64le), with Python 3.14 and pip.
 - Network access to OpenAI and an `OPENAI_API_KEY`.
-- QNX audio drivers and capture/playback helpers implementing the [PCM interface](docs/QNX.md#audio-interface).
+- QNX audio drivers and `arecord`/`aplay`, or custom helpers implementing the [PCM interface](docs/QNX.md#audio-interface).
 
-The voice client, camera capture, and network integrations run on QNX. Native capture/playback helpers and physical microphone/speaker acceptance are still required for a complete wearable voice loop.
+The voice client, camera capture, and network integrations run on QNX. The default audio adapter uses the QNX ports of `arecord` and `aplay`. Physical microphone/speaker acceptance is required for each audio device.
 
 ## Setup
 
@@ -28,7 +28,14 @@ Runtime dependencies are pinned in `requirements-voice.txt`, exported from `uv.l
 
 ## Voice
 
-With native audio helpers installed, supply their executable paths:
+With a microphone and speaker connected to the QNX audio device:
+
+```sh
+commbadge voice --list-devices
+commbadge voice
+```
+
+Use `--input-device` and `--output-device` to select devices other than `default`. For a board image without `arecord`/`aplay`, supply custom raw PCM helpers:
 
 ```sh
 commbadge voice --audio-backend commands \
@@ -36,7 +43,7 @@ commbadge voice --audio-backend commands \
   --playback-command '/path/to/playback-helper'
 ```
 
-These paths are placeholders for the required helpers, which are not included in this repository.
+These paths are placeholders for custom helpers; they are unnecessary when the native `arecord`/`aplay` tools are available.
 
 Press **Ctrl+C** to end the session. Sessions default to five minutes; use `--max-seconds 60` to change the limit. Add `--no-captions` to hide transcripts. The client saves no audio or transcript files. Acoustic echo cancellation must be handled by the audio path.
 

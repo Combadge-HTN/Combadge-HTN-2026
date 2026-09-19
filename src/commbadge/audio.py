@@ -2,7 +2,7 @@
 
 import asyncio
 import shutil
-import sys
+import subprocess
 from contextlib import suppress
 from typing import Protocol
 
@@ -35,16 +35,17 @@ class SilenceAudio:
 
 
 class CommandAudio:
-    """Connect raw PCM capture/playback helpers without invoking a shell.
+    """Stream mono PCM16LE at 24 kHz through native capture/playback programs.
 
-    Helpers must produce/consume mono PCM16LE at 24 kHz.
+    Ordinary pipes keep helper I/O portable across QNX and other platforms.
+    Blocking operations run in threads; terminating helpers releases pending I/O.
     """
 
     def __init__(self, capture_command: list[str], playback_command: list[str]):
         self.capture_command = capture_command
         self.playback_command = playback_command
-        self.recorder: asyncio.subprocess.Process | None = None
-        self.player: asyncio.subprocess.Process | None = None
+        self.recorder: subprocess.Popen | None = None
+        self.player: subprocess.Popen | None = None
         self._logs: dict[str, str] = {}
         self._log_tasks: list[asyncio.Task] = []
 
@@ -53,68 +54,90 @@ class CommandAudio:
             if not command or shutil.which(command[0]) is None:
                 raise RuntimeError("Audio helper is missing; check capture/playback commands.")
 
-    async def _collect_errors(self, name: str, process: asyncio.subprocess.Process) -> None:
+    def _collect_errors(self, name: str, process: subprocess.Popen) -> None:
         assert process.stderr is not None
-        while chunk := await process.stderr.read(1024):
+        while chunk := process.stderr.read(1024):
             self._logs[name] = (self._logs.get(name, "") + chunk.decode(errors="replace"))[-2048:]
 
     async def start(self) -> None:
         self.preflight()
         try:
-            self.player = await asyncio.create_subprocess_exec(
-                *self.playback_command,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
+            self.player = subprocess.Popen(
+                self.playback_command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                bufsize=0,
             )
-            self.recorder = await asyncio.create_subprocess_exec(
-                *self.capture_command,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            self.recorder = subprocess.Popen(
+                self.capture_command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
             )
             for name, process in (("capture", self.recorder), ("playback", self.player)):
-                self._log_tasks.append(asyncio.create_task(self._collect_errors(name, process)))
+                self._log_tasks.append(
+                    asyncio.create_task(asyncio.to_thread(self._collect_errors, name, process))
+                )
         except BaseException:
             await self.close()
             raise
 
-    async def read(self) -> bytes:
+    def _read_frame(self) -> bytes:
         assert self.recorder and self.recorder.stdout
-        try:
-            return await self.recorder.stdout.readexactly(FRAME_BYTES)
-        except asyncio.IncompleteReadError as error:
-            raise RuntimeError(
-                "Microphone stopped. Check the capture device/helper. "
-                + self._logs.get("capture", "")
-            ) from error
+        frame = bytearray()
+        while len(frame) < FRAME_BYTES:
+            chunk = self.recorder.stdout.read(FRAME_BYTES - len(frame))
+            if not chunk:
+                raise RuntimeError(
+                    "Microphone stopped. Check the capture device/helper. "
+                    + self._logs.get("capture", "")
+                )
+            frame.extend(chunk)
+        return bytes(frame)
 
-    async def write(self, data: bytes) -> None:
+    async def read(self) -> bytes:
+        return await asyncio.to_thread(self._read_frame)
+
+    def _write_all(self, data: bytes) -> None:
         assert self.player and self.player.stdin
+        remaining = memoryview(data)
         try:
-            self.player.stdin.write(data)
-            await self.player.stdin.drain()
+            while remaining:
+                count = self.player.stdin.write(remaining)
+                if not count:
+                    raise BrokenPipeError("Playback pipe closed.")
+                remaining = remaining[count:]
         except (BrokenPipeError, ConnectionResetError) as error:
             raise RuntimeError(
                 "Speaker stopped. Check the playback device/helper. "
                 + self._logs.get("playback", "")
             ) from error
 
+    async def write(self, data: bytes) -> None:
+        await asyncio.to_thread(self._write_all, data)
+
     async def close(self) -> None:
-        for process in (self.recorder, self.player):
-            if process is not None:
-                if process.returncode is None:
-                    with suppress(ProcessLookupError):
-                        process.terminate()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=2)
-                except TimeoutError:
-                    with suppress(ProcessLookupError):
-                        process.kill()
-                    await process.wait()
-        for task in self._log_tasks:
-            task.cancel()
+        processes = [p for p in (self.recorder, self.player) if p is not None]
+        # Stop both ends before waiting, releasing blocked capture and playback threads.
+        for process in processes:
+            if process.poll() is None:
+                with suppress(ProcessLookupError):
+                    process.terminate()
+        for process in processes:
+            try:
+                await asyncio.to_thread(process.wait, timeout=2)
+            except subprocess.TimeoutExpired:
+                with suppress(ProcessLookupError):
+                    process.kill()
+                await asyncio.to_thread(process.wait)
         await asyncio.gather(*self._log_tasks, return_exceptions=True)
+        self._log_tasks.clear()
+        for process in processes:
+            for pipe in (process.stdin, process.stdout, process.stderr):
+                if pipe is not None:
+                    pipe.close()
 
 
 class AlsaAudio(CommandAudio):
@@ -139,10 +162,9 @@ class AlsaAudio(CommandAudio):
         )
 
     def preflight(self) -> None:
-        if not sys.platform.startswith("linux"):
-            raise RuntimeError(
-                "ALSA is the Linux adapter. For QNX, see docs/QNX.md and the commands backend."
-            )
         for name in ("arecord", "aplay"):
             if shutil.which(name) is None:
-                raise RuntimeError(f"{name} is missing. On Linux: sudo apt install alsa-utils")
+                raise RuntimeError(
+                    f"{name} is missing. Install the platform audio utilities "
+                    "or configure --audio-backend commands; see docs/QNX.md."
+                )
