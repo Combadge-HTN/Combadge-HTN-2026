@@ -1,6 +1,6 @@
 # Combadge-HTN-2026
 
-A wearable voice assistant for Raspberry Pi 5 running QNX 8.0. The Python application streams microphone audio to OpenAI GPT-Live and plays spoken responses through the badge.
+A wearable voice assistant named **Computer** for Raspberry Pi 5 running QNX 8.0. The Python application streams microphone audio to OpenAI GPT-Live and plays spoken responses through the badge.
 
 ## Requirements
 

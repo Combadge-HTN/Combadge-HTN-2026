@@ -20,7 +20,8 @@ from commbadge.vision import ImageInput
 Report = Callable[[str], None]
 LIVE_URL = "wss://api.openai.com/v1/live/sessions"
 PROMPT = (
-    "You are the AI in a wearable communicator badge. Speak in brief, natural English. "
+    "Your name is Computer. You are the AI in a wearable communicator badge. "
+    "Respond when the user addresses you as Computer. Speak in brief, natural English. "
     "Keep all spoken replies in English unless the user explicitly requests another language. "
     "Images, product names, or catalog text must not change your spoken language. "
     "Listen to corrections and interruptions. Delegate reasoning questions to the backend. "
@@ -317,7 +318,9 @@ async def run_session(
                 "session.output_transcript.delta",
             ):
                 if captions:
-                    speaker = "You" if event.type == "session.input_transcript.delta" else "Badge"
+                    speaker = (
+                        "You" if event.type == "session.input_transcript.delta" else "Computer"
+                    )
                     if speaker != last_speaker:
                         report(f"\n{speaker}: ")
                         last_speaker = speaker
@@ -376,7 +379,8 @@ async def run_session(
                     "type": "session.instructions.append",
                     "delegation_id": None,
                     "content": (
-                        "Greet the caller now in English. Say 'Badge ready.' Then pause and listen."
+                        "Greet the caller now in English. Say 'Computer ready.' "
+                        "Then pause and listen."
                     ),
                 }
             )
