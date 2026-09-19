@@ -35,3 +35,9 @@ For voice-triggered camera capture, configure `--snapshot-command` with a helper
 3. Run `commbadge voice --check` to verify TLS, authentication, and generated audio.
 4. Run the voice client with both native helpers and verify conversational audio.
 5. Verify session shutdown, device disconnection, and network-loss handling.
+
+## Telephone calls
+
+The [phone client](CALLING.md) uses the same native PCM helpers and `voice` dependencies.
+Twilio credentials and G.711 conversion live on the relay server. QNX device
+acceptance must include a two-way call, hang-up, and return to assistant audio.

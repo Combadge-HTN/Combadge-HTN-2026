@@ -36,7 +36,15 @@ class FunctionCall:
 
 
 class SnapshotDelegation:
-    def __init__(self, connection, capture: SnapshotCapture, report: Callable[[str], None]):
+    def __init__(
+        self,
+        connection,
+        capture: SnapshotCapture | None,
+        report: Callable[[str], None],
+        *,
+        call_handler=None,
+    ):
+        self.call_handler = call_handler
         self.connection = connection
         self.capture = capture
         self.report = report
@@ -77,25 +85,35 @@ class SnapshotDelegation:
             for call in calls:
                 image = None
                 try:
-                    if call.name != "capture_snapshot":
-                        raise ValueError("Unknown tool; no action was performed.")
-                    args = json.loads(call.arguments)
-                    if (
-                        not isinstance(args, dict)
-                        or set(args) != {"question"}
-                        or not isinstance(args["question"], str)
-                        or not args["question"].strip()
-                        or len(args["question"]) > 4000
-                    ):
-                        raise ValueError(
-                            "Snapshot needs a non-empty question of at most 4000 characters."
-                        )
-                    self.report("\nCapturing a fresh image…\n")
-                    image = await self.capture.capture(args["question"])
-                    result = {"status": "captured", "image_id": call.call_id}
+                    if call.name == "call_contact" and self.call_handler is not None:
+                        args = json.loads(call.arguments)
+                        if (
+                            not isinstance(args, dict)
+                            or set(args) != {"contact"}
+                            or not isinstance(args["contact"], str)
+                        ):
+                            raise ValueError("Expected exactly one contact name")
+                        result = await self.call_handler(args["contact"])
+                    else:
+                        if call.name != "capture_snapshot" or self.capture is None:
+                            raise ValueError("Unknown tool; no action was performed.")
+                        args = json.loads(call.arguments)
+                        if (
+                            not isinstance(args, dict)
+                            or set(args) != {"question"}
+                            or not isinstance(args["question"], str)
+                            or not args["question"].strip()
+                            or len(args["question"]) > 4000
+                        ):
+                            raise ValueError(
+                                "Snapshot needs a non-empty question of at most 4000 characters."
+                            )
+                        self.report("\nCapturing a fresh image…\n")
+                        image = await self.capture.capture(args["question"])
+                        result = {"status": "captured", "image_id": call.call_id}
                 except (OSError, RuntimeError, ValueError) as error:
                     result = {"status": "failed", "error": str(error)}
-                    self.report("\nSnapshot failed; reporting the error to the assistant.\n")
+                    self.report("\nTool failed; reporting the error to the assistant.\n")
                 await self.connection.send(
                     {
                         "type": "response.item.create",

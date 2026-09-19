@@ -57,7 +57,24 @@ def main(argv: list[str] | None = None) -> int:
     snapshots.add_argument(
         "--snapshot-command", help="image capture helper with {directory} placeholder (no shell)"
     )
+    voice.add_argument("--calls", action="store_true", help="enable human phone calls via a relay")
+    from commbadge.phone.cli import register
+    from commbadge.phone.cli import run as run_phone
+
+    register(commands)
     args = parser.parse_args(argv)
+    if args.command in ("call", "phone-relay"):
+        return run_phone(args, parser)
+    phone_settings = None
+    if args.command == "voice" and args.calls:
+        if args.check or args.list_devices:
+            parser.error("--calls requires a voice session")
+        from commbadge.phone.config import PhoneSettings
+
+        try:
+            phone_settings = PhoneSettings.load(args.env_file)
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
 
     image = None
     snapshot_capture = None
@@ -130,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
                     else None,
                     image=image,
                     snapshot_capture=snapshot_capture,
+                    phone_settings=phone_settings,
                     playback_command=shlex.split(args.playback_command)
                     if args.playback_command
                     else None,
@@ -142,7 +160,11 @@ def main(argv: list[str] | None = None) -> int:
             return 130
         except Exception as error:
             message = str(error) or type(error).__name__
-            for secret in (settings.openai_api_key, settings.browserbase_api_key):
+            for secret in (
+                settings.openai_api_key,
+                settings.browserbase_api_key,
+                phone_settings.token if phone_settings else "",
+            ):
                 if secret:
                     message = message.replace(secret, "[REDACTED]")
             parser.exit(1, f"Voice failed: {message}\n")

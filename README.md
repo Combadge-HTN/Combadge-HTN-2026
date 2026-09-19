@@ -85,6 +85,16 @@ commbadge voice --screenshots
 
 This uses `cosmic-screenshot` through the desktop screenshot portal. Allow its screen-capture permission prompt if shown. Each requested screenshot is sent to OpenAI for analysis. Capture is opt-in for the session; it is not continuous recording. Capture failures are returned to the assistant, and capture helpers time out after 30 seconds. `--screenshots` and `--snapshot-command` are mutually exclusive and require a voice session rather than `--check`.
 
+## Human phone calls
+
+Configure a Twilio audio relay to speak directly to another person through the badge.
+Use `commbadge call alex` for a standalone call, or add `--calls` to a voice session
+and say “Call Alex.” Contact names and numbers are configured on the relay.
+
+The relay handles telephone audio conversion; the badge keeps its 24 kHz PCM
+helpers. Calls use Twilio credits. See [calling setup](docs/CALLING.md) for relay
+hosting, credentials, QNX commands, hang-up behavior, and validation limits.
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -96,7 +106,7 @@ This uses `cosmic-screenshot` through the desktop screenshot portal. Allow its s
 | `BROWSERBASE_API_KEY` | Unset | Reserved for browser integration |
 | `BROWSERBASE_PROJECT_ID` | Unset | Reserved for browser integration |
 
-The client uses the GPT-Live WebSocket protocol with Responses delegation. Enabling capture registers the `capture_snapshot` tool; browser and commerce actions are not implemented yet. Voice sessions and delegated inference incur separate charges.
+The client uses the GPT-Live WebSocket protocol with Responses delegation. Enabling capture registers `capture_snapshot`; `--calls` registers `call_contact`. Browser and commerce actions are not implemented yet. Voice sessions and delegated inference incur separate charges.
 
 ## Documentation
 
