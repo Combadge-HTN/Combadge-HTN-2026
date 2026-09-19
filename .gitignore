@@ -22,3 +22,7 @@ recordings/
 *.log
 node_modules/
 dist/
+build/
+*.egg-info/
+.coverage
+htmlcov/

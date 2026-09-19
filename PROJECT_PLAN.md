@@ -31,7 +31,7 @@ flowchart LR
     Backend -. optional .-> Other[Composio / Baseten / Warp]
 ```
 
-Suggested starting stack: Python device process on Raspberry Pi OS for audio and control; one backend process for tool integrations, using TypeScript if it makes Browserbase integration easier. Avoid introducing two languages until the device and tool requirements justify it. Run backend locally on a laptop initially if that shortens setup.
+Selected stack: Python for both the device process on Raspberry Pi OS and backend tool integrations. The application package lives under `src/commbadge`, with dependencies and developer tooling in `pyproject.toml`. The existing `scripts/audio_check.py` remains a standalone tool. Run backend locally on a laptop initially if that shortens setup.
 
 OpenAI currently documents GPT-Live separately from the Realtime API. Its examples use `gpt-live-1`; account access has not been tested. For a native device, use the primary Live WebSocket, with raw mono PCM16 at 24 kHz as in the official example. Start with Responses delegation for the first tool flow. Client delegation can later attach a custom agent or Baseten-backed inference, but requires the application to maintain context and orchestrate results. Do not mix Live session events with older Realtime examples.
 

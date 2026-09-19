@@ -4,6 +4,43 @@ A wearable voice assistant inspired by the Star Trek communicator: chest control
 
 **Status:** starter repository. Local audio diagnostics are implemented; cloud voice, badge controls, and sponsor integrations are planned.
 
+## Python setup
+
+The application is written in Python, with Python 3.11 or later required. Run these commands from the repository root on your laptop or Pi:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[dev]'
+commbadge doctor
+```
+
+On Raspberry Pi OS, install `python3-venv` if virtual environment creation fails. For a device without development tools, use `python -m pip install -e .` instead. On Windows, activate with `.venv\Scripts\Activate.ps1` in PowerShell; the ALSA audio script itself requires Linux.
+
+`commbadge doctor` checks credential presence and audio tool availability locally. It never calls an API or prints credential values; it does not verify credentials or connected hardware. It reads `.env` from the current directory, with exported environment variables taking precedence. Use `commbadge doctor --env-file /path/to/.env` to choose a different file. Missing keys are allowed while working on hardware. `python -m commbadge doctor` is equivalent.
+
+If you do not already have `.env`, copy `.env.example` to `.env` and fill in your local values. Never overwrite an existing credential file.
+
+## Development
+
+```bash
+pytest
+ruff check .
+ruff format --check .
+```
+
+GitHub Actions runs these checks on Python 3.11, 3.12, and 3.13. Formatting and linting cover the new package and tests; the existing audio script is intentionally left unchanged.
+
+```text
+src/commbadge/         Python application package
+  cli.py              commbadge command and local diagnostics
+  config.py           .env / environment configuration
+scripts/audio_check.py  Existing standalone audio tool (unchanged)
+tests/                Configuration and secret-output regression checks
+docs/                 Hardware notes
+pyproject.toml        Package, dependency, and tooling configuration
+```
+
 ## First milestone: hear yourself through the Pi
 
 Start with Raspberry Pi OS, a USB microphone, and a supported USB audio output adapter for the 3.5 mm speaker. A USB headset can substitute for both during bench testing. See [hardware notes](docs/HARDWARE.md) before connecting the Sound Detector.
