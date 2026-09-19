@@ -399,3 +399,17 @@ def test_call_creation_cancellation_recovers_sid_and_ends_call():
         assert carrier.ended.is_set() and relay.call is None
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("shop_account", [False, True])
+def test_phone_and_shopping_tools_coexist(shop_account):
+    config = session_config(
+        Settings(), snapshots=True, shopping=True, shop_account=shop_account, call_names=["edmon"]
+    )
+    backend = config["delegation"]["responses"]
+    names = {tool["name"] for tool in backend["tools"]}
+    assert {"capture_snapshot", "call_contact", "search_shopify"} <= names
+    assert ("save_shopify_item" if shop_account else "open_shopify_checkout") in names
+    assert "call_contact" in backend["instructions"]
+    assert "shop" in backend["instructions"].lower()
+    assert backend["parallel_tool_calls"] is False

@@ -5,7 +5,8 @@ from types import SimpleNamespace as NS
 import pytest
 
 from commbadge.delegation import SnapshotDelegation
-from commbadge.vision import ImageInput
+from commbadge.shopify import ShoppingSession
+from commbadge.vision import MAX_SESSION_IMAGE_BYTES, ImageInput
 
 
 def event(kind, **fields):
@@ -135,3 +136,84 @@ def test_returns_all_function_results_before_continuation():
     ]
     assert outputs == ["c1", "c2"]
     assert connection.messages[-1] == {"type": "response.create"}
+
+
+def test_full_image_budget_reports_error_and_continues_without_sending_image():
+    async def scenario():
+        connection, capture = Connection(), Capture()
+        delegation = SnapshotDelegation(connection, capture, lambda _: None)
+        delegation.image_budget.used_bytes = MAX_SESSION_IMAGE_BYTES
+        delegation.observe(event("response.created", response=NS(id="r1")))
+        delegation.observe(call())
+        delegation.observe(event("response.completed", response=NS(id="r1")))
+        worker = asyncio.create_task(delegation.run())
+        try:
+            await asyncio.wait_for(connection.continued.wait(), 1)
+            assert len(connection.messages) == 2
+            result = json.loads(connection.messages[0]["item"]["output"])
+            assert result["status"] == "failed" and "Restart" in result["error"]
+            assert connection.messages[-1] == {"type": "response.create"}
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_capture_image_is_reused_by_shopping_tool_and_failure_clears_it():
+    class Catalog:
+        country = "CA"
+        currency = "CAD"
+        calls = []
+
+        def filters(self):
+            return {"available": True}
+
+        async def call(self, name, args):
+            self.calls.append((name, args))
+            return {"products": []}
+
+    async def scenario():
+        connection, capture, catalog = Connection(), Capture(), Catalog()
+        shopping = ShoppingSession(catalog, report=lambda _: None)
+        delegation = SnapshotDelegation(connection, capture, lambda _: None, shopping=shopping)
+        worker = asyncio.create_task(delegation.run())
+
+        async def invoke(response_id, function):
+            connection.continued.clear()
+            delegation.observe(event("response.created", response=NS(id=response_id)))
+            delegation.observe(function)
+            delegation.observe(event("response.completed", response=NS(id=response_id)))
+            await asyncio.wait_for(connection.continued.wait(), 1)
+
+        try:
+            await invoke("r1", call())
+            await invoke(
+                "r2",
+                call(
+                    "c2",
+                    "search_shopify",
+                    '{"query":"blue bottle","use_image":true,"max_price_minor":null}',
+                ),
+            )
+            assert len(capture.calls) == 1
+            assert catalog.calls[0][1]["like"][0]["image"]["data"] in shopping.image.data_url
+            capture.fail = True
+            await invoke("r3", call("c3"))
+            assert shopping.image is None
+            await invoke(
+                "r4",
+                call(
+                    "c4",
+                    "search_shopify",
+                    '{"query":"bottle","use_image":true,"max_price_minor":null}',
+                ),
+            )
+            assert len(catalog.calls) == 1
+            output = connection.messages[-2]["item"]["output"]
+            assert json.loads(output)["status"] == "failed"
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+
+    asyncio.run(scenario())

@@ -1,6 +1,6 @@
 # Combadge-HTN-2026
 
-A wearable voice assistant for Raspberry Pi 5 running QNX 8.0. The Python application streams microphone audio to OpenAI GPT-Live and plays spoken responses through the badge.
+A wearable voice assistant named **Computer** for Raspberry Pi 5 running QNX 8.0. The Python application streams microphone audio to OpenAI GPT-Live and plays spoken responses through the badge.
 
 ## Requirements
 
@@ -53,7 +53,9 @@ commbadge voice --audio-backend commands \
   --question 'What is shown in this image?'
 ```
 
-The application sends the image once to the configured vision-capable Responses backend. GPT-Live speaks about the findings, and subsequent voice questions can refer to the same image. This uses a still image, not a continuous camera feed. JPEG, PNG, and WebP inputs up to 5 MiB are accepted. Image contents are sent to OpenAI; no public image URL is required.
+The application sends the image once to the configured vision-capable Responses backend. GPT-Live speaks about the findings, and subsequent voice questions can refer to the same image. This uses a still image, not a continuous camera feed. JPEG, PNG, and WebP source files up to 20 MiB are accepted. With the optional `images` extra installed (`python -m pip install -e '.[images]'`), files larger than 256 KiB are resized without cropping and compressed to JPEG before upload. Without that extra, the capture helper must supply an encoded image no larger than 256 KiB. Image contents are sent to OpenAI; no public image URL is required.
+
+GPT-Live limits backend input history to 4 MiB per session, including base64 image data. The app limits each encoded image to 256 KiB and reserves at most 2 MiB of history for image messages, leaving space for conversation and tool results. When the image budget fills, further captures return an error to the assistant without uploading another image; restart the voice session to continue capturing. Long conversations can also reach the service's item/history limits.
 
 To check image delegation without opening audio devices:
 
@@ -80,6 +82,7 @@ The helper must write exactly one JPEG, PNG, or WebP into `{directory}` and exit
 For COSMIC screen capture:
 
 ```sh
+python -m pip install -e '.[images]'
 commbadge voice --screenshots
 ```
 
@@ -95,6 +98,68 @@ The relay handles telephone audio conversion; the badge keeps its 24 kHz PCM
 helpers. Calls use Twilio credits. See [calling setup](docs/CALLING.md) for relay
 hosting, credentials, QNX commands, hang-up behavior, and validation limits.
 
+## Shopping with Shopify
+
+Enable product discovery and checkout handoff with `--shopify`:
+
+```sh
+commbadge voice --shopify --snapshot-command '/path/to/camera-helper --output-dir {directory}'
+```
+
+Say **“Find something like this on Shopify under fifty dollars.”** The badge captures the requested view, searches Shopify's Global Catalog using the image and your preferences, and compares relevant offers. Follow up with **“Is the first one available in blue?”** or **“Find a cheaper one.”** The most recent image is reused until you request a new capture. A shopping image is sent to both OpenAI and Shopify.
+
+Connect your personal Shop account once:
+
+```sh
+commbadge shop-account login
+commbadge shop-account status
+```
+
+Open the sign-in link on your phone and approve the connection. The command waits for approval. Then add `--shop-account` to the voice command:
+
+```sh
+commbadge voice --shopify --shop-account \
+  --audio-backend commands \
+  --capture-command '/path/to/capture-helper' \
+  --playback-command '/path/to/playback-helper' \
+  --snapshot-command '/path/to/camera-helper --output-dir {directory}'
+```
+
+Say **“Computer, find something like this under fifty dollars.”** Select a specific offer, then say **“Add that to my Shop account.”** Computer rechecks the variant and prepares an **unpaid merchant checkout** using your connected account. This response does **not** verify that the checkout appears in the Shop app cart. Direct app visibility was observed in two initial merchant tests but did not reproduce in a later shopping session; phone handoff remains unresolved. Computer reports checkout creation separately from app visibility. Different merchants have separate checkouts. Each save creates a checkout; it does not combine items into a shared cart or update a previous checkout.
+
+Computer reports returned checkout totals and warns when shipping exceeds the item subtotal. Missing shipping/tax amounts are not assumed to be zero. Changed offers require a new confirmation. If a request fails with an uncertain outcome, inspect the trace before retrying to avoid duplicate checkouts. The app exposes no payment or order-completion operation.
+
+For screen capture, use `commbadge voice --shopify --shop-account --screenshots`. Account mode does not open a browser. The separate guest flow remains available with `--shopify --open-checkout`, which opens a merchant checkout link instead; these modes cannot be combined.
+
+Credentials are stored in `~/.local/state/commbadge/shop-auth.json`, with owner-only file permissions, outside the repository. This is a plaintext credential file, not a keychain. Tokens are refreshed when needed. Use `--auth-file PATH` on `shop-account` and `--shop-auth-file PATH` on `voice` to choose another private location. `commbadge shop-account logout` deletes local credentials; revoke the agent in Shop to remove its account access. Credentials, addresses and payment details are never sent to the voice model. The merchant receives a scoped token and the buyer's public network address (resolved through ipify) for checkout authentication and risk checks.
+
+The account adapter uses Python's standard library and needs no Node.js runtime. Target networking and TLS still require QNX verification. This integration uses Shopify's personal-agent flow for an individual's connected account; broader product distribution requires confirming Shopify's applicable terms and access requirements.
+
+### Checkout diagnostics
+
+Every account checkout attempt prints a `Shop trace: <id>` and records an owner-only JSON file in `shop-traces/` alongside the selected Shop credential file (default `~/.local/state/commbadge/shop-traces/`). Traces retain the merchant, requested variant and quantity, stage, timestamp, merchant checkout ID, checkout status, diagnostic codes, totals and continuation URL when provided. No audio, screenshots, credentials, buyer contact details, addresses or payment objects are recorded. Checkout IDs and continuation URLs are private and omitted from terminal trace output.
+
+```sh
+commbadge shop-account trace
+commbadge shop-account trace --trace-id TRACE_ID --refresh
+```
+
+The first command lists the ten most recent traces without network access. `--refresh` calls only `get_checkout` on the recorded merchant; it does not create a checkout, alter a cart, or submit payment. Creation evidence is preserved separately from the refreshed state. Neither result proves visibility in the phone app. Raw trace files contain private checkout access information; avoid sharing them publicly. Attempts made before tracing was implemented cannot be recovered from the console transcript alone.
+
+Search defaults to products shipping to Canada with CAD prices. `SHOPIFY_COUNTRY` supports `CA` or `US`; `SHOPIFY_CURRENCY` supports `CAD` or `USD`. Prices exclude shipping and tax. Results are candidates, not proof of an exact match or the lowest price across all stores. Catalog availability and final checkout totals can change.
+
+You can also use a supplied photo or search by description:
+
+```sh
+commbadge voice --shopify --image /path/to/product.jpg --question 'Find a similar item under CAD 50'
+commbadge shop 'blue insulated bottle' --max-price 5000
+commbadge shop 'a bottle like this' --image /path/to/product.jpg
+```
+
+`shop` outputs JSON; its price limit is in cents. It does not require an OpenAI key. Shopify discovery uses a public UCP capability profile and does not require a merchant Admin API token. The default profile is an immutable copy of `docs/ucp-agent.json` served as JSON from the project's public repository through jsDelivr. Override `SHOPIFY_AGENT_PROFILE_URL` to host your own profile at an HTTPS URL serving `application/json`; GitHub raw's `text/plain` response is rejected by the catalog. Shopping tools are opt-in and cannot be combined with the voice `--check` flag.
+
+API references: [Shopify Global Catalog](https://shopify.dev/docs/agents/catalog/global-catalog), [agent profiles](https://shopify.dev/docs/agents/get-started/profile), and [checkout handoff](https://shopify.dev/docs/agents/carts-and-checkout), and [Shop personal agents](https://help.shop.app/en/shop/shopping/personal-agents).
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -106,7 +171,7 @@ hosting, credentials, QNX commands, hang-up behavior, and validation limits.
 | `BROWSERBASE_API_KEY` | Unset | Reserved for browser integration |
 | `BROWSERBASE_PROJECT_ID` | Unset | Reserved for browser integration |
 
-The client uses the GPT-Live WebSocket protocol with Responses delegation. Enabling capture registers `capture_snapshot`; `--calls` registers `call_contact`. Browser and commerce actions are not implemented yet. Voice sessions and delegated inference incur separate charges.
+The client uses the GPT-Live WebSocket protocol with Responses delegation. `--calls` registers `call_contact`. Enabling capture registers `capture_snapshot`; `--shopify` adds catalog search, product details, and merchant checkout handoff. General browser automation and merchant inventory actions are not implemented. Voice sessions and delegated inference incur separate charges.
 
 ## Documentation
 

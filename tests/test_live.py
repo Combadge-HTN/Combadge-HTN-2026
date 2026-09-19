@@ -6,7 +6,7 @@ import pytest
 
 from commbadge.audio import FRAME_BYTES
 from commbadge.config import Settings
-from commbadge.live import run_session
+from commbadge.live import run_session, session_config
 from commbadge.vision import ImageInput
 
 
@@ -106,6 +106,81 @@ class FakeAudio:
 
 def audio_event(data):
     return event("session.output_audio.delta", delta=base64.b64encode(data).decode())
+
+
+def test_shopping_tools_are_opt_in_and_snapshot_is_independently_optional():
+    baseline = session_config(Settings())
+    assert "tools" not in baseline["delegation"]["responses"]
+    shopping = session_config(Settings(), shopping=True)
+    names = {t["name"] for t in shopping["delegation"]["responses"]["tools"]}
+    assert names == {"search_shopify", "get_shopify_product", "open_shopify_checkout"}
+    both = session_config(Settings(), shopping=True, snapshots=True)
+    assert "capture_snapshot" in {t["name"] for t in both["delegation"]["responses"]["tools"]}
+
+
+def test_shopping_without_capture_runs_tools_and_keeps_audio_flowing():
+    class Shopping:
+        image = None
+
+        async def search(self, **kwargs):
+            await audio_written.wait()
+            return {"status": "no_matches", "offers": []}
+
+        async def product(self, **kwargs):
+            raise AssertionError("Unexpected product lookup")
+
+        async def checkout(self, **kwargs):
+            raise AssertionError("Unexpected checkout")
+
+    class Audio(FakeAudio):
+        async def write(self, data):
+            self.output.append(data)
+            audio_written.set()
+
+    class Connection(FakeConnection):
+        async def send(self, message):
+            await super().send(message)
+            if message["type"] == "response.create":
+                stop.set()
+
+    async def scenario():
+        nonlocal audio_written, stop
+        audio_written, stop = asyncio.Event(), asyncio.Event()
+        script = [
+            event(
+                "response.event",
+                delegation_id="d",
+                event=event("response.created", response=NS(id="r")),
+            ),
+            event(
+                "response.event",
+                delegation_id="d",
+                event=event(
+                    "response.output_item.done",
+                    item=NS(
+                        type="function_call",
+                        call_id="c",
+                        name="search_shopify",
+                        arguments='{"query":"bottle","use_image":false,"max_price_minor":null}',
+                    ),
+                ),
+            ),
+            event(
+                "response.event",
+                delegation_id="d",
+                event=event("response.completed", response=NS(id="r")),
+            ),
+            audio_event(b"\x01\x00" * (FRAME_BYTES // 2)),
+        ]
+        conn, audio = Connection(script), Audio(stop)
+        stats = await run_session(
+            conn, audio, Settings(), stop, seconds=1, shopping=Shopping(), report=lambda _: None
+        )
+        assert audio.output and stats.finalized
+        assert any(m.get("item", {}).get("type") == "function_call_output" for m in conn.messages)
+
+    audio_written = stop = None
+    asyncio.run(scenario())
 
 
 def test_bidirectional_audio_and_captions_finalize_cleanly():

@@ -1,4 +1,4 @@
-"""Execute snapshot function calls without blocking the Live audio receiver."""
+"""Execute snapshot and shopping function calls without blocking the Live audio receiver."""
 
 import asyncio
 import json
@@ -6,6 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from commbadge.capture import SnapshotCapture
+from commbadge.shopify import ShoppingSession
+from commbadge.vision import ImageBudget
 
 SNAPSHOT_TOOL = {
     "type": "function",
@@ -42,11 +44,14 @@ class SnapshotDelegation:
         capture: SnapshotCapture | None,
         report: Callable[[str], None],
         *,
+        shopping: ShoppingSession | None = None,
         call_handler=None,
     ):
         self.call_handler = call_handler
         self.connection = connection
         self.capture = capture
+        self.shopping = shopping
+        self.image_budget = ImageBudget()
         self.report = report
         self.active: dict[str, str] = {}
         self.pending: dict[str, list[FunctionCall]] = {}
@@ -75,7 +80,7 @@ class SnapshotDelegation:
                 try:
                     self.queue.put_nowait(calls)
                 except asyncio.QueueFull as error:
-                    raise RuntimeError("Too many pending snapshot requests.") from error
+                    raise RuntimeError("Too many pending tool requests.") from error
         elif event.type in ("response.failed", "response.incomplete", "response.cancelled"):
             self.pending.pop(event.response.id, None)
 
@@ -85,22 +90,16 @@ class SnapshotDelegation:
             for call in calls:
                 image = None
                 try:
+                    args = json.loads(call.arguments)
+                    if not isinstance(args, dict):
+                        raise ValueError("Tool arguments must be an object.")
                     if call.name == "call_contact" and self.call_handler is not None:
-                        args = json.loads(call.arguments)
-                        if (
-                            not isinstance(args, dict)
-                            or set(args) != {"contact"}
-                            or not isinstance(args["contact"], str)
-                        ):
+                        if set(args) != {"contact"} or not isinstance(args["contact"], str):
                             raise ValueError("Expected exactly one contact name")
                         result = await self.call_handler(args["contact"])
-                    else:
-                        if call.name != "capture_snapshot" or self.capture is None:
-                            raise ValueError("Unknown tool; no action was performed.")
-                        args = json.loads(call.arguments)
+                    elif call.name == "capture_snapshot" and self.capture is not None:
                         if (
-                            not isinstance(args, dict)
-                            or set(args) != {"question"}
+                            set(args) != {"question"}
                             or not isinstance(args["question"], str)
                             or not args["question"].strip()
                             or len(args["question"]) > 4000
@@ -109,8 +108,48 @@ class SnapshotDelegation:
                                 "Snapshot needs a non-empty question of at most 4000 characters."
                             )
                         self.report("\nCapturing a fresh image…\n")
-                        image = await self.capture.capture(args["question"])
+                        if self.shopping is not None:
+                            self.shopping.image = None
+                        captured = await self.capture.capture(args["question"])
+                        self.image_budget.add(captured)
+                        image = captured
+                        if self.shopping is not None:
+                            self.shopping.image = image
                         result = {"status": "captured", "image_id": call.call_id}
+                    elif self.shopping is not None:
+                        handlers = {
+                            "search_shopify": (
+                                self.shopping.search,
+                                {"query", "use_image", "max_price_minor"},
+                            ),
+                            "get_shopify_product": (
+                                self.shopping.product,
+                                {"product_id", "selected"},
+                            ),
+                            "open_shopify_checkout": (self.shopping.checkout, {"variant_id"}),
+                        }
+                        if getattr(self.shopping, "account", None) is not None:
+                            handlers.pop("open_shopify_checkout")
+                            handlers["save_shopify_item"] = (
+                                self.shopping.save,
+                                {"variant_id", "quantity"},
+                            )
+                        if call.name not in handlers:
+                            raise ValueError("Unknown tool; no action was performed.")
+                        handler, keys = handlers[call.name]
+                        if set(args) != keys:
+                            raise ValueError("Unexpected or missing tool arguments.")
+                        if call.name == "get_shopify_product" and not isinstance(
+                            args["product_id"], str
+                        ):
+                            raise ValueError("product_id must be a string.")
+                        if call.name == "open_shopify_checkout" and not isinstance(
+                            args["variant_id"], str
+                        ):
+                            raise ValueError("variant_id must be a string.")
+                        result = await handler(**args)
+                    else:
+                        raise ValueError("Unknown tool; no action was performed.")
                 except (OSError, RuntimeError, ValueError) as error:
                     result = {"status": "failed", "error": str(error)}
                     self.report("\nTool failed; reporting the error to the assistant.\n")
