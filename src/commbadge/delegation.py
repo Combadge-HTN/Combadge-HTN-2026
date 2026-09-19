@@ -1,13 +1,15 @@
-"""Execute snapshot and shopping function calls without blocking the Live audio receiver."""
+"""Execute application function calls without blocking the Live audio receiver."""
 
 import asyncio
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from commbadge.browserbase import WEB_TOOL_NAMES, BrowserbaseClient
 from commbadge.capture import SnapshotCapture
 from commbadge.shopify import ShoppingSession
 from commbadge.vision import ImageBudget
+from commbadge.web_lookup import WebLookup
 
 SNAPSHOT_TOOL = {
     "type": "function",
@@ -35,6 +37,7 @@ class FunctionCall:
     call_id: str
     name: str
     arguments: str
+    delegation_id: str = ""
 
 
 class SnapshotDelegation:
@@ -45,6 +48,7 @@ class SnapshotDelegation:
         report: Callable[[str], None],
         *,
         shopping: ShoppingSession | None = None,
+        web: BrowserbaseClient | None = None,
         call_handler=None,
         on_tools_submitted: Callable[[], None] | None = None,
     ):
@@ -53,6 +57,8 @@ class SnapshotDelegation:
         self.connection = connection
         self.capture = capture
         self.shopping = shopping
+        self.web = web
+        self.web_lookup = WebLookup(web, report) if web is not None else None
         self.image_budget = ImageBudget()
         self.report = report
         self.active: dict[str, str] = {}
@@ -74,7 +80,7 @@ class SnapshotDelegation:
             if item.call_id not in self.seen:
                 self.seen.add(item.call_id)
                 self.pending[response_id].append(
-                    FunctionCall(item.call_id, item.name, item.arguments)
+                    FunctionCall(item.call_id, item.name, item.arguments, delegation)
                 )
         elif event.type == "response.completed":
             calls = self.pending.pop(event.response.id, [])
@@ -118,6 +124,8 @@ class SnapshotDelegation:
                         if self.shopping is not None:
                             self.shopping.image = image
                         result = {"status": "captured", "image_id": call.call_id}
+                    elif call.name in WEB_TOOL_NAMES and self.web_lookup is not None:
+                        result = await self.web_lookup.execute(call.name, args, call.delegation_id)
                     elif self.shopping is not None:
                         handlers = {
                             "search_shopify": (

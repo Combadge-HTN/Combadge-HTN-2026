@@ -11,6 +11,8 @@ import subprocess
 from importlib.metadata import version
 from pathlib import Path
 
+from commbadge.audio import MacAudio, audio_backend
+from commbadge.browserbase import BrowserbaseClient
 from commbadge.capture import COSMIC_SCREENSHOT, SnapshotCapture
 from commbadge.config import load_settings
 from commbadge.shop_account import DEFAULT_AUTH_FILE, ShopAccount, TokenStore
@@ -37,11 +39,19 @@ def main(argv: list[str] | None = None) -> int:
         "--check", action="store_true", help="test generated audio without a microphone"
     )
     voice.add_argument(
-        "--list-devices", action="store_true", help="list ALSA devices; no API calls"
+        "--list-devices", action="store_true", help="list audio devices; no API calls"
     )
-    voice.add_argument("--input-device", default="default", help="ALSA capture device")
-    voice.add_argument("--output-device", default="default", help="ALSA playback device")
-    voice.add_argument("--audio-backend", choices=("alsa", "commands"), default="alsa")
+    voice.add_argument(
+        "--input-device", default="default", help="input device name or index (Mac), or ALSA device"
+    )
+    voice.add_argument(
+        "--output-device",
+        default="default",
+        help="output device name or index (Mac), or ALSA device",
+    )
+    voice.add_argument(
+        "--audio-backend", choices=("auto", "mac", "alsa", "commands"), default="auto"
+    )
     voice.add_argument("--capture-command", help="raw PCM capture helper command (no shell)")
     voice.add_argument("--playback-command", help="raw PCM playback helper command (no shell)")
     voice.add_argument(
@@ -49,6 +59,9 @@ def main(argv: list[str] | None = None) -> int:
         type=positive_seconds,
         default=None,
         help="session limit after startup (default: 300; check: 15; image check: 45)",
+    )
+    voice.add_argument(
+        "--no-web", action="store_true", help="disable automatic Browserbase online lookups"
     )
     voice.add_argument("--no-captions", action="store_true", help="hide transcript output")
     voice.add_argument("--image", type=Path, help="send a JPEG, PNG, or WebP to the vision backend")
@@ -100,6 +113,14 @@ def main(argv: list[str] | None = None) -> int:
     shop.add_argument("--image", type=Path, help="JPEG, PNG, or WebP for visual product search")
     shop.add_argument("--env-file", type=Path, default=Path(".env"))
     shop.add_argument("--max-price", type=int, help="maximum item price in cents (CAD by default)")
+    web_search = commands.add_parser("web-search", help="check Browserbase search without audio")
+    web_search.add_argument("query", help="search terms (up to 200 characters)")
+    web_search.add_argument("--env-file", type=Path, default=Path(".env"))
+    web_search.add_argument(
+        "--read-first",
+        action="store_true",
+        help="also fetch the first result to verify page access",
+    )
     args = parser.parse_args(argv)
     if args.command in ("call", "phone-relay"):
         return run_phone(args, parser)
@@ -180,6 +201,18 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("custom commands require --audio-backend commands")
 
     if args.command == "voice" and args.list_devices:
+        if audio_backend(args.audio_backend) == "mac":
+            try:
+                devices = MacAudio.driver().query_devices()
+                if not devices:
+                    raise RuntimeError(
+                        "No audio devices are visible. Run from your Mac terminal and "
+                        "check System Settings > Sound."
+                    )
+                print(devices)
+            except Exception as error:
+                parser.exit(1, f"Audio devices unavailable: {error}\n")
+            return 0
         for name in ("arecord", "aplay"):
             if not shutil.which(name):
                 parser.exit(1, f"{name} is missing. On Linux: sudo apt install alsa-utils\n")
@@ -193,6 +226,21 @@ def main(argv: list[str] | None = None) -> int:
         settings = load_settings(args.env_file)
     except OSError:
         parser.exit(1, "Could not read the selected environment file. Check its permissions.\n")
+
+    if args.command == "web-search":
+        try:
+            web = BrowserbaseClient(settings.browserbase_api_key, settings.browserbase_project_id)
+
+            async def lookup():
+                result = await web.search(args.query)
+                if args.read_first and result["sources"]:
+                    result["page"] = await web.read_page(result["sources"][0]["url"])
+                return result
+
+            print(json.dumps(asyncio.run(lookup()), indent=2, ensure_ascii=False))
+            return 0
+        except (OSError, ValueError, RuntimeError) as error:
+            parser.exit(1, f"Web lookup failed: {error}\n")
 
     if args.command == "shop" or (args.command == "voice" and args.shopify):
         try:
@@ -231,11 +279,22 @@ def main(argv: list[str] | None = None) -> int:
         try:
             from commbadge.live import connect_voice
 
+            web = (
+                BrowserbaseClient(settings.browserbase_api_key, settings.browserbase_project_id)
+                if settings.browserbase_api_key and not args.no_web and not args.check
+                else None
+            )
+            print(
+                "Web access: Browserbase enabled (uses API credits)."
+                if web is not None
+                else "Web access: disabled (--no-web/--check or BROWSERBASE_API_KEY not set)."
+            )
             print("Connecting to GPT-Live. This uses paid API credits; Ctrl+C ends the session.")
             asyncio.run(
                 connect_voice(
                     settings,
                     check=args.check,
+                    backend=args.audio_backend,
                     input_device=args.input_device,
                     output_device=args.output_device,
                     seconds=args.max_seconds or ((45 if image else 15) if args.check else 300),
@@ -247,6 +306,7 @@ def main(argv: list[str] | None = None) -> int:
                     snapshot_capture=snapshot_capture,
                     phone_settings=phone_settings,
                     shopping=shopping,
+                    web=web,
                     playback_command=shlex.split(args.playback_command)
                     if args.playback_command
                     else None,
@@ -276,13 +336,26 @@ def main(argv: list[str] | None = None) -> int:
     ):
         print(f"  {name}: {'set' if present else 'not set'}")
     host = platform.system()
-    print(f"Audio tools ({host}):")
-    names = ("wave", "waverec") if host == "QNX" else ("arecord", "aplay")
-    for name in names:
-        status = "available" if shutil.which(name) else "missing"
-        print(f"  {name}: {status}")
+    if host == "Darwin":
+        try:
+            MacAudio.driver()
+            print("Mac audio: CoreAudio adapter available")
+        except RuntimeError as error:
+            print(f"Mac audio: {error}")
+    else:
+        print(f"Audio tools ({host}):")
+        names = ("wave", "waverec") if host == "QNX" else ("arecord", "aplay")
+        for name in names:
+            status = "available" if shutil.which(name) else "missing"
+            print(f"  {name}: {status}")
     if host == "QNX":
         print("Audio: configure native PCM helpers with --audio-backend commands; see docs/QNX.md.")
+    print(
+        "Web access: enabled for voice sessions"
+        if settings.browserbase_api_key
+        else "Web access: unavailable; set BROWSERBASE_API_KEY"
+    )
+    print("Web check: commbadge web-search 'Browserbase documentation' --read-first")
     print("API check: commbadge voice --check")
     print("Voice options: commbadge voice --help")
     return 0

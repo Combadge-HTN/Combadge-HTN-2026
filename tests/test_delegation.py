@@ -217,3 +217,75 @@ def test_capture_image_is_reused_by_shopping_tool_and_failure_clears_it():
             await asyncio.gather(worker, return_exceptions=True)
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "name,arguments,fails",
+    [
+        ("search_web", '{"query":"weather Toronto"}', False),
+        ("read_web_page", '{"url":"https://example.com"}', False),
+        ("search_web", '{"query":"weather Toronto"}', True),
+        ("search_web", '{"query":"weather","extra":"bad"}', False),
+        ("read_web_page", '{"url":42}', False),
+    ],
+)
+def test_web_tools_return_results_or_errors_and_continue(name, arguments, fails):
+    from unittest.mock import AsyncMock
+
+    async def scenario():
+        connection = Connection()
+        web = NS(search=AsyncMock(), read_page=AsyncMock())
+        handler = web.search if name == "search_web" else web.read_page
+        handler.return_value = {"status": "ok", "sources": []}
+        if fails:
+            handler.side_effect = RuntimeError("Browserbase unavailable")
+        # A shopping session must not swallow web tool dispatch.
+        delegation = SnapshotDelegation(connection, None, lambda _: None, web=web, shopping=NS())
+        delegation.observe(event("response.created", response=NS(id="r1")))
+        delegation.observe(call(name=name, arguments=arguments))
+        delegation.observe(event("response.completed", response=NS(id="r1")))
+        worker = asyncio.create_task(delegation.run())
+        try:
+            await asyncio.wait_for(connection.continued.wait(), 1)
+            messages = connection.messages
+            assert len(messages) == 2
+            assert messages[0]["item"]["call_id"] == "c1"
+            result = json.loads(messages[0]["item"]["output"])
+            invalid = "extra" in arguments or "42" in arguments
+            assert result["status"] == ("failed" if fails or invalid else "ok")
+            assert handler.await_count == (0 if invalid else 1)
+            assert messages[-1] == {"type": "response.create"}
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_stopping_worker_cancels_web_lookup_without_late_output():
+    async def scenario():
+        started, cancelled = asyncio.Event(), asyncio.Event()
+
+        class Web:
+            async def search(self, query):
+                started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.set()
+
+        connection = Connection()
+        delegation = SnapshotDelegation(connection, None, lambda _: None, web=Web())
+        delegation.observe(event("response.created", response=NS(id="r1")))
+        delegation.observe(call(name="search_web", arguments='{"query":"news"}'))
+        delegation.observe(event("response.completed", response=NS(id="r1")))
+        worker = asyncio.create_task(delegation.run())
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+        assert cancelled.is_set()
+        assert connection.messages == []
+
+    asyncio.run(scenario())

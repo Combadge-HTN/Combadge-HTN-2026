@@ -26,7 +26,36 @@ Create `.env` using [.env.example](.env.example) and set `OPENAI_API_KEY`. Envir
 
 Runtime dependencies are pinned in `requirements-voice.txt`, exported from `uv.lock`. QNX networking and dependency execution require target validation; see [QNX integration](docs/QNX.md).
 
-## Voice
+## Voice on macOS
+
+Install the optional Mac audio support in the project environment:
+
+```sh
+uv sync --extra voice --extra mac
+.venv/bin/commbadge voice
+```
+
+`voice` automatically uses CoreAudio on macOS and ALSA on Linux. The Mac adapter
+uses [sounddevice raw streams](https://python-sounddevice.readthedocs.io/en/latest/api/raw-streams.html)
+at 24 kHz, mono PCM16. PortAudio is included in the macOS wheel; NumPy is not needed.
+Allow microphone access for your terminal when macOS prompts. If denied, enable it
+in **System Settings → Privacy & Security → Microphone**, then restart the terminal.
+Use headphones to prevent the assistant's voice from feeding back into the microphone;
+this adapter does not provide acoustic echo cancellation.
+
+List devices and optionally select the numeric IDs or device names:
+
+```sh
+.venv/bin/commbadge voice --list-devices
+.venv/bin/commbadge voice --input-device 'MacBook Pro Microphone' --output-device 'MacBook Pro Speakers'
+```
+
+Use the actual device names from the listing. The default uses the system devices.
+`--audio-backend mac` explicitly selects this adapter. To activate the environment
+in fish, use `source .venv/bin/activate.fish`; bash/zsh use `source .venv/bin/activate`.
+Calling `.venv/bin/commbadge` directly requires no activation.
+
+## Voice on QNX
 
 With native audio helpers installed, supply their executable paths:
 
@@ -41,6 +70,77 @@ These paths are placeholders for the required helpers, which are not included in
 Press **Ctrl+C** to end the session. Sessions default to five minutes; use `--max-seconds 60` to change the limit. Add `--no-captions` to hide transcripts. The client saves no audio or transcript files. Acoustic echo cancellation must be handled by the audio path.
 
 `commbadge doctor` reports configuration and audio utility availability. `commbadge voice --check` verifies API access and generated audio without opening audio devices; it consumes API credits.
+
+## Live web research with Browserbase
+
+Set `BROWSERBASE_API_KEY` in `.env` or the environment. Normal `commbadge voice`
+sessions automatically enable web research. `BROWSERBASE_PROJECT_ID` optionally
+selects the browser project; otherwise Browserbase infers it from the API key.
+No local Chromium, Node.js, or additional package is required beyond the voice
+extra. Add `--no-web` to disable research; `--check` also disables it.
+
+The conversation loop is:
+
+1. GPT-Live hears a question and delegates it to `OPENAI_BACKEND_MODEL`.
+2. That model chooses a search, page fetch, or real browser navigation.
+3. The app executes the operation on Browserbase and sends the result back to the
+   backend as a function result. Browserbase does not decide when the answer is sufficient.
+4. The backend can follow a returned link, read more, or stop with findings and source URLs.
+5. GPT-Live speaks those findings while the microphone/audio loop remains active.
+
+The tools are `search_web` (up to five candidate URLs), `read_web_page` (fast static
+Markdown), `browse_web_page` (remote Chromium with JavaScript), `follow_web_link`
+(a link from the current rendered page), and `read_more_web_page` (the next excerpt).
+Rendered pages return readable text, title, public metadata and labeled links to the
+backend, not screenshots. Link IDs are tied to the current page, so old-page links
+cannot accidentally navigate the new page. The browser supports public navigation,
+not logins, arbitrary button clicks, form submissions, account changes, or purchases.
+
+For **“How many views does MrBeast's latest YouTube video have, and when was it
+uploaded?”**, the backend is instructed to open the official channel in the browser,
+follow the latest relevant video, and inspect that item's count/date. Announcements
+about upcoming videos do not answer that question. Ordinary articles/docs can use
+Fetch instead. If an authoritative page plus one useful fallback cannot verify a
+fact, the assistant should state the limitation, not assume the fact does not exist.
+Blocked and login-required pages may still be inaccessible in a real browser.
+
+Each Live delegation has a hard limit of **two searches, eight web tool calls, and
+60 seconds**. Tool continuations share that budget; a new delegation gets a new one.
+Repeated identical searches/static page reads in a delegation reuse their results,
+but still consume an action so duplicates cannot create an endless loop. Model
+routing remains probabilistic; these bounds limit network work, not guarantee
+answer accuracy. The whole voice session has a separate limit of 24 web operations
+(including browser session creation/navigation). Cleanup bypasses that limit.
+
+The terminal prints queries, candidate source titles/URLs, opened pages, and
+`Read source [browser]` or `Read source [fetch]` after successful retrieval. A read
+confirms access, not the factual answer. These progress messages remain visible
+with `--no-captions`, which hides speech transcripts only.
+
+Test Search/Fetch without microphone or OpenAI inference:
+
+```sh
+commbadge web-search 'Browserbase documentation' --read-first
+```
+
+This uses Browserbase credits. Search, Fetch, and cloud browser sessions are billed
+by Browserbase; delegated inference uses OpenAI credits. `commbadge doctor` checks
+credential presence, not access. HTTP 403 can indicate unavailable project/API
+access; 402 indicates credits; 429 indicates a rate limit.
+
+Requests/URLs go to Browserbase and retrieved content goes to OpenAI. The app does
+not persist web lookups locally. Browser recording/logging are disabled in the
+created session. The browser is released on voice shutdown; disconnects release it
+and a 180-second server TTL bounds orphaned sessions. REST requests use a 20-second
+socket timeout and 25-second async deadline; cancelling cannot kill an already
+running HTTP worker. API responses are capped at 2 MiB, rendered text at 60,000
+characters with 12,000-character excerpts, and page metadata/links are bounded.
+Treat all website content as untrusted evidence, never instructions for badge tools.
+
+References: [Browserbase Search](https://docs.browserbase.com/reference/api/web-search),
+[Fetch](https://docs.browserbase.com/reference/api/fetch-a-page),
+[cloud sessions](https://docs.browserbase.com/reference/api/create-a-session), and
+[GPT-Live delegation](https://developers.openai.com/api/docs/guides/live-delegation).
 
 ## Image questions
 
@@ -176,10 +276,10 @@ API references: [Shopify Global Catalog](https://shopify.dev/docs/agents/catalog
 | `OPENAI_LIVE_MODEL` | `gpt-live-1` | Voice model |
 | `OPENAI_LIVE_VOICE` | `marin` | Response voice |
 | `OPENAI_BACKEND_MODEL` | `gpt-5.6-luna` | Delegated reasoning model |
-| `BROWSERBASE_API_KEY` | Unset | Reserved for browser integration |
-| `BROWSERBASE_PROJECT_ID` | Unset | Reserved for browser integration |
+| `BROWSERBASE_API_KEY` | Unset | Enables automatic Search/Fetch tools in voice sessions |
+| `BROWSERBASE_PROJECT_ID` | Unset | Optional cloud browser project; inferred from API key if unset |
 
-The client uses the GPT-Live WebSocket protocol with Responses delegation. `--calls` registers `call_contact`. Enabling capture registers `capture_snapshot`; `--shopify` adds catalog search, product details, and merchant checkout handoff. General browser automation and merchant inventory actions are not implemented. Voice sessions and delegated inference incur separate charges.
+The client uses the GPT-Live WebSocket protocol with Responses delegation. `--calls` registers `call_contact`. Enabling capture registers `capture_snapshot`; `--shopify` adds catalog search, product details, and merchant checkout handoff. A configured Browserbase key adds web search, static page reading, and rendered browser navigation. Arbitrary browser actions and merchant inventory actions are not implemented. Voice sessions and delegated inference incur separate charges.
 
 ## Documentation
 

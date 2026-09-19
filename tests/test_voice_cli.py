@@ -65,3 +65,43 @@ def test_invalid_snapshot_options_fail_before_connecting(args):
         main(["voice", *args])
     assert error.value.code == 2
     connect.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "key,options,enabled",
+    [
+        ("bb-test", [], True),
+        ("", [], False),
+        ("bb-test", ["--no-web"], False),
+        ("bb-test", ["--check"], False),
+    ],
+)
+def test_voice_enables_web_when_configured(tmp_path, key, options, enabled):
+    from unittest.mock import AsyncMock
+
+    path = tmp_path / ".env"
+    path.write_text(f"OPENAI_API_KEY=test\nBROWSERBASE_API_KEY={key}\n")
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch("commbadge.live.connect_voice", new_callable=AsyncMock) as connect,
+    ):
+        assert main(["voice", "--env-file", str(path), *options]) == 0
+    assert (connect.call_args.kwargs["web"] is not None) == enabled
+
+
+def test_web_search_cli_can_check_search_and_fetch_without_openai(tmp_path, capsys):
+    from unittest.mock import AsyncMock
+
+    path = tmp_path / ".env"
+    path.write_text("BROWSERBASE_API_KEY=test\n")
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch("commbadge.cli.BrowserbaseClient") as client,
+    ):
+        client.return_value.search = AsyncMock(
+            return_value={"status": "ok", "sources": [{"url": "https://example.com"}]}
+        )
+        client.return_value.read_page = AsyncMock(return_value={"content": "Example page"})
+        assert main(["web-search", "query", "--read-first", "--env-file", str(path)]) == 0
+        client.return_value.read_page.assert_awaited_once_with("https://example.com")
+    assert "Example page" in capsys.readouterr().out

@@ -8,9 +8,25 @@ import signal
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from commbadge.audio import FRAME_BYTES, RATE, AlsaAudio, AudioIO, CommandAudio, SilenceAudio
+from commbadge.audio import (
+    FRAME_BYTES,
+    RATE,
+    AlsaAudio,
+    AudioIO,
+    CommandAudio,
+    MacAudio,
+    SilenceAudio,
+    audio_backend,
+)
+from commbadge.browserbase import (
+    BACKEND_WEB_INSTRUCTIONS,
+    LIVE_WEB_INSTRUCTIONS,
+    WEB_TOOLS,
+    BrowserbaseClient,
+)
 from commbadge.capture import SnapshotCapture
 from commbadge.config import Settings
 from commbadge.delegation import SNAPSHOT_TOOL, SnapshotDelegation
@@ -75,6 +91,7 @@ def session_config(
     call_names: list[str] | None = None,
     shopping: bool = False,
     shop_account: bool = False,
+    web: bool = False,
 ) -> dict:
     config = {
         "model": settings.live_model,
@@ -231,6 +248,22 @@ def session_config(
         )
         backend.setdefault("tools", []).append(call_tool(call_names))
         backend["parallel_tool_calls"] = False
+    if web:
+        config["instructions"] += LIVE_WEB_INSTRUCTIONS
+        backend = config["delegation"]["responses"]
+        backend["instructions"] = (
+            backend["instructions"]
+            .replace("You have no external action tools. Be honest about that.", "")
+            .replace("You have no other action tools.", "")
+        ) + BACKEND_WEB_INSTRUCTIONS
+        backend["instructions"] += f" Current UTC time: {datetime.now(UTC).isoformat()}."
+        backend.setdefault("tools", []).extend(WEB_TOOLS)
+        backend["parallel_tool_calls"] = False
+    else:
+        config["instructions"] += (
+            " Live web access is unavailable in this session. Do not claim to search online "
+            "or verify current facts; explain the limitation when a lookup is needed."
+        )
     return config
 
 
@@ -274,6 +307,7 @@ async def run_session(
     snapshot_capture: SnapshotCapture | None = None,
     phone_settings=None,
     shopping: ShoppingSession | None = None,
+    web: BrowserbaseClient | None = None,
 ) -> LiveStats:
     """Run a connected session; injectable audio/connection enable hardware-free tests."""
     stats = LiveStats()
@@ -316,10 +350,11 @@ async def run_session(
             snapshot_capture,
             report,
             shopping=shopping,
+            web=web,
             call_handler=call_handler,
             on_tools_submitted=tools_submitted,
         )
-        if snapshot_capture is not None or shopping is not None or call_handler is not None
+        if any(item is not None for item in (snapshot_capture, shopping, call_handler, web))
         else None
     )
     if snapshots is not None and image is not None:
@@ -430,6 +465,7 @@ async def run_session(
                         snapshots=snapshot_capture is not None,
                         call_names=call_names,
                         shopping=shopping is not None,
+                        web=web is not None,
                         shop_account=getattr(shopping, "account", None) is not None,
                     ),
                 }
@@ -503,6 +539,11 @@ async def run_session(
         try:
             await audio.close()
         finally:
+            if web is not None and callable(getattr(web, "close", None)):
+                try:
+                    await web.close()
+                except Exception:
+                    report("\nWarning: browser cleanup was not confirmed.\n")
             if start_sent:
                 try:
                     await finalize(connection, stats, close_timeout)
@@ -537,12 +578,14 @@ async def connect_voice(
     output_device: str,
     seconds: float,
     captions: bool,
+    backend: str = "auto",
     capture_command: list[str] | None = None,
     playback_command: list[str] | None = None,
     image: ImageInput | None = None,
     snapshot_capture: SnapshotCapture | None = None,
     phone_settings=None,
     shopping: ShoppingSession | None = None,
+    web: BrowserbaseClient | None = None,
 ) -> LiveStats:
     # Lazy import keeps the base package usable without the voice extra.
     from websockets.asyncio.client import connect
@@ -555,6 +598,9 @@ async def connect_voice(
         audio = SilenceAudio()
     elif capture_command is not None and playback_command is not None:
         audio = CommandAudio(capture_command, playback_command)
+        audio.preflight()
+    elif audio_backend(backend) == "mac":
+        audio = MacAudio(input_device, output_device)
         audio.preflight()
     else:
         audio = AlsaAudio(input_device, output_device)
@@ -587,6 +633,7 @@ async def connect_voice(
                 snapshot_capture=snapshot_capture,
                 phone_settings=phone_settings,
                 shopping=shopping,
+                web=web,
             )
         # Both session.closed and the WebSocket close precede any telephone audio.
         if stats.phone_contact is not None and not stop.is_set():

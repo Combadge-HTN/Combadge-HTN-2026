@@ -140,6 +140,7 @@ def test_voice_disconnects_before_dialing_and_never_reconnects(
             return {"status": "completed", "contact": contact}
 
         monkeypatch.setattr(live, "AlsaAudio", Audio)
+        monkeypatch.setattr(live, "MacAudio", Audio)
         monkeypatch.setattr(live, "run_session", fast_session)
         monkeypatch.setattr(websockets.asyncio.client, "connect", lambda *a, **kw: Context())
         if transport == "relay":
