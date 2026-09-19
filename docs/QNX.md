@@ -6,6 +6,8 @@ Target: Raspberry Pi 5, QNX 8.0, aarch64le, Python 3.14.
 
 The application requires Python 3.14, TLS certificates, DNS, outbound secure WebSocket access, asyncio, and subprocess support. Runtime dependencies are `python-dotenv` and `websockets`; both provide pure-Python wheels. Install the pinned dependencies using the [setup instructions](../README.md#setup).
 
+Speaker identification adds the pure-Python dependencies in `requirements-speakers.txt`; see [speaker setup](SPEAKERS.md).
+
 The session layer uses the [GPT-Live WebSocket protocol](https://developers.openai.com/api/docs/guides/voice-websockets?api=live) directly. QNX runtime execution and end-to-end audio remain unvalidated.
 
 ## Audio interface
@@ -38,6 +40,8 @@ installed Sensor Framework and TurboJPEG libraries; no Pillow is needed.
 mkdir -p /tmp/badge-photo
 native/qnx-camera/combadge-camera --unit 4 --output-dir /tmp/badge-photo
 ```
+
+For voice-triggered photos, add `--camera` to the voice command after building the helper. Say “Computer, look at this.” This selects the physical unit 4 camera and describes it as such to the model. Use `--camera-unit N` to override the unit.
 
 Use a fresh output directory for each capture. For voice integration, append
 `--snapshot-command '/absolute/path/to/native/qnx-camera/combadge-camera --unit 4 --output-dir {directory}'`

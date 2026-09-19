@@ -53,7 +53,7 @@ def test_empty_question_rejected():
 
 
 def test_large_screenshot_fits_live_history_after_base64_encoding():
-    from PIL import Image
+    Image = pytest.importorskip("PIL.Image", reason="optional image-resizing extra")
 
     source = Image.frombytes("RGB", (2560, 1440), random.Random(7).randbytes(2560 * 1440 * 3))
     png = io.BytesIO()
@@ -78,6 +78,7 @@ def test_large_image_without_optional_resizer_fails_before_upload():
 
 
 def test_invalid_large_image_is_reported_as_a_tool_error():
+    pytest.importorskip("PIL.Image", reason="optional image-resizing extra")
     with pytest.raises(ValueError, match="decoded"):
         ImageInput.from_bytes(b"\x89PNG\r\n\x1a\n" + bytes(MAX_ENCODED_IMAGE_BYTES))
 

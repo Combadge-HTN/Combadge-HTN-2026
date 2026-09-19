@@ -1,6 +1,7 @@
 """Capture a fresh still image with a configured device helper."""
 
 import asyncio
+import platform
 import shutil
 from contextlib import suppress
 from pathlib import Path
@@ -17,12 +18,32 @@ COSMIC_SCREENSHOT = [
 ]
 
 
+def qnx_camera_capture(unit: int = 4) -> SnapshotCapture:
+    """Select the built QNX helper, independent of the current directory."""
+    if platform.system() != "QNX":
+        raise ValueError("--camera requires the QNX camera helper on the Pi")
+    if unit < 1:
+        raise ValueError("Camera unit must be positive")
+    executable = shutil.which("combadge-camera")
+    if executable is None:
+        helper = Path(__file__).resolve().parents[2] / "native/qnx-camera/combadge-camera"
+        if not helper.is_file():
+            raise ValueError("Build the camera helper first: make -C native/qnx-camera")
+        executable = str(helper)
+    return SnapshotCapture(
+        [executable, "--unit", str(unit), "--output-dir", "{directory}"], source="camera"
+    )
+
+
 class SnapshotCapture:
     """Run a trusted command that writes one encoded image into a fresh directory."""
 
-    def __init__(self, command: list[str], *, timeout: float = 30):
+    def __init__(self, command: list[str], *, timeout: float = 30, source: str = "device"):
         if not command or not any("{directory}" in arg for arg in command):
             raise ValueError("Snapshot command must contain {directory} for its output directory.")
+        if source not in ("device", "screen", "camera"):
+            raise ValueError("Invalid capture source")
+        self.source = source
         self.command = command
         self.timeout = timeout
 

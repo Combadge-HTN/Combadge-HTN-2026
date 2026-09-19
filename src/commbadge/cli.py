@@ -11,7 +11,7 @@ import subprocess
 from importlib.metadata import version
 from pathlib import Path
 
-from commbadge.capture import COSMIC_SCREENSHOT, SnapshotCapture
+from commbadge.capture import COSMIC_SCREENSHOT, SnapshotCapture, qnx_camera_capture
 from commbadge.config import load_settings
 from commbadge.shop_account import DEFAULT_AUTH_FILE, ShopAccount, TokenStore
 from commbadge.shopify import CatalogClient, ShoppingSession
@@ -65,6 +65,12 @@ def main(argv: list[str] | None = None) -> int:
     voice.add_argument("--image", type=Path, help="send a JPEG, PNG, or WebP to the vision backend")
     voice.add_argument("--question", help="question about --image (default: describe the image)")
     snapshots = voice.add_mutually_exclusive_group()
+    snapshots.add_argument(
+        "--camera", action="store_true", help="enable voice-triggered QNX camera photos"
+    )
+    voice.add_argument(
+        "--camera-unit", type=int, default=None, help="QNX sensor unit for --camera (default: 4)"
+    )
     snapshots.add_argument(
         "--screenshots", action="store_true", help="enable voice-triggered COSMIC screenshots"
     )
@@ -172,14 +178,25 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--open-checkout requires --shopify")
         if args.shopify and (args.check or args.list_devices):
             parser.error("--shopify requires a voice session, not --check or --list-devices")
-        if args.screenshots or args.snapshot_command:
+        if args.camera_unit is not None and not args.camera:
+            parser.error("--camera-unit requires --camera")
+        if args.camera_unit is not None and args.camera_unit < 1:
+            parser.error("--camera-unit must be positive")
+        if args.camera or args.screenshots or args.snapshot_command:
             if args.check or args.list_devices:
                 parser.error(
                     "snapshot tools require a voice session, not --check or --list-devices"
                 )
             try:
-                snapshot_capture = SnapshotCapture(
-                    COSMIC_SCREENSHOT if args.screenshots else shlex.split(args.snapshot_command)
+                snapshot_capture = (
+                    qnx_camera_capture(args.camera_unit or 4)
+                    if args.camera
+                    else SnapshotCapture(
+                        COSMIC_SCREENSHOT
+                        if args.screenshots
+                        else shlex.split(args.snapshot_command),
+                        source="screen" if args.screenshots else "device",
+                    )
                 )
                 snapshot_capture.preflight()
             except ValueError as error:

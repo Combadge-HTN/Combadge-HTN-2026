@@ -76,7 +76,18 @@ The camera integration boundary is `ImageInput.from_bytes(encoded_image, questio
 
 Enable a capture helper, then say **“Hey, look at this”** or **“Take another picture and tell me what you see.”** The agent requests a fresh snapshot, the application captures it, and the vision backend returns findings to the spoken conversation. Follow-up questions can use the last image.
 
-For a device camera, add this option to the voice command:
+For the QNX Pi camera, build the helper once and enable camera capture:
+
+```sh
+make -C native/qnx-camera
+commbadge voice --camera --audio-backend commands \
+  --capture-command '/path/to/capture-helper' \
+  --playback-command '/path/to/playback-helper'
+```
+
+Say **“Computer, look at this”**. The backend captures a fresh physical camera photo and analyzes it. `--camera` selects unit 4; use `--camera-unit N` to select another unit. It finds the built helper independently of the current directory, or uses `combadge-camera` from `PATH`. Camera and desktop screenshot modes are mutually exclusive. Capture still happens only on request.
+
+For a different device camera, add this option to the voice command:
 
 ```sh
 --snapshot-command '/path/to/camera-helper --output-dir {directory}'

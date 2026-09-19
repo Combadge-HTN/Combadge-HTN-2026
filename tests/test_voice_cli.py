@@ -103,3 +103,36 @@ def test_speaker_analysis_command_prints_segments_without_transcript(tmp_path, c
     assert "Edmon" in output
     assert "analysis_seconds" in output
     assert "test-key" not in output
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--camera", "--screenshots"],
+        ["--camera", "--snapshot-command", "helper {directory}"],
+        ["--camera", "--check"],
+        ["--camera", "--list-devices"],
+        ["--camera-unit", "4"],
+        ["--camera", "--camera-unit", "0"],
+    ],
+)
+def test_invalid_camera_options(args):
+    with pytest.raises(SystemExit) as error:
+        main(["voice", *args])
+    assert error.value.code == 2
+
+
+def test_camera_option_configures_photo_capture(tmp_path):
+    from commbadge.capture import SnapshotCapture
+
+    env = tmp_path / ".env"
+    env.write_text("OPENAI_API_KEY=test-key\n")
+    capture = SnapshotCapture(["camera", "{directory}"], source="camera")
+    with (
+        patch("commbadge.cli.qnx_camera_capture", return_value=capture) as factory,
+        patch.object(capture, "preflight"),
+        patch("commbadge.live.connect_voice") as connect,
+    ):
+        assert main(["voice", "--camera", "--camera-unit", "4", "--env-file", str(env)]) == 0
+    factory.assert_called_once_with(4)
+    assert connect.call_args.kwargs["snapshot_capture"].source == "camera"
