@@ -4,7 +4,7 @@ import sys
 import unittest
 from unittest.mock import Mock, patch
 
-from commbadge.touch import MPR121
+from combadge.touch import MPR121
 
 
 class FakeBus:
@@ -34,10 +34,10 @@ class FakeBus:
 
 class SensorTests(unittest.TestCase):
     def setUp(self):
-        sleep = patch("commbadge.touch.time.sleep")
+        sleep = patch("combadge.touch.time.sleep")
         sleep.start()
         self.addCleanup(sleep.stop)
-        clock = patch("commbadge.touch.time.monotonic", return_value=10.0)
+        clock = patch("combadge.touch.time.monotonic", return_value=10.0)
         self.clock = clock.start()
         self.addCleanup(clock.stop)
         self.bus = FakeBus()
@@ -106,7 +106,7 @@ class SensorTests(unittest.TestCase):
     def test_owned_resources_closed_once_even_on_application_error(self):
         gpio = Mock(BCM=11, IN=1, PUD_UP=2, LOW=0)
         with (
-            patch("commbadge.touch.QNXI2C", return_value=self.bus),
+            patch("combadge.touch.QNXI2C", return_value=self.bus),
             patch.dict(sys.modules, rpi_gpio=gpio),
         ):
             with self.assertRaisesRegex(ValueError, "application"):
@@ -121,7 +121,7 @@ class SensorTests(unittest.TestCase):
         self.bus.reset_value = 0
         gpio = Mock()
         with (
-            patch("commbadge.touch.QNXI2C", return_value=self.bus),
+            patch("combadge.touch.QNXI2C", return_value=self.bus),
             patch.dict(sys.modules, rpi_gpio=gpio),
         ):
             with self.assertRaisesRegex(RuntimeError, "expected 36"):
@@ -134,7 +134,7 @@ class SensorTests(unittest.TestCase):
         gpio.input.return_value = 1
         buses = [FakeBus(), FakeBus()]
         with (
-            patch("commbadge.touch.QNXI2C", side_effect=buses),
+            patch("combadge.touch.QNXI2C", side_effect=buses),
             patch.dict(sys.modules, rpi_gpio=gpio),
         ):
             for _ in range(2):
@@ -144,7 +144,7 @@ class SensorTests(unittest.TestCase):
         gpio.cleanup.assert_not_called()
 
     def test_invalid_settings_fail_before_opening_hardware(self):
-        with patch("commbadge.touch.QNXI2C") as factory:
+        with patch("combadge.touch.QNXI2C") as factory:
             for kwargs in (
                 {"address": 0x70},
                 {"poll_interval": 0},

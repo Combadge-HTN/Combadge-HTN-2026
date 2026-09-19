@@ -8,7 +8,7 @@ from dotenv import dotenv_values
 
 # Immutable, public capability declaration; no credentials or payment support.
 SHOPIFY_PROFILE_URL = (
-    "https://cdn.jsdelivr.net/gh/edmonshi/Combadge-HTN-2026@5279994/docs/ucp-agent.json"
+    "https://cdn.jsdelivr.net/gh/Combadge-HTN/Combadge-HTN-2026@5279994/docs/ucp-agent.json"
 )
 
 

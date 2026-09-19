@@ -4,10 +4,10 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from commbadge.audio import FRAME_BYTES
-from commbadge.config import Settings
-from commbadge.live import run_session, session_config
-from commbadge.vision import ImageInput
+from combadge.audio import FRAME_BYTES
+from combadge.config import Settings
+from combadge.live import run_session, session_config
+from combadge.vision import ImageInput
 
 
 def event(kind, **values):

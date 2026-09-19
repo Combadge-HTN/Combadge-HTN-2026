@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from commbadge.vision import (
+from combadge.vision import (
     MAX_ENCODED_IMAGE_BYTES,
     MAX_IMAGE_BYTES,
     MAX_SESSION_IMAGE_BYTES,

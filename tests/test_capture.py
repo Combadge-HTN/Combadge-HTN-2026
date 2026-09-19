@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from commbadge.capture import SnapshotCapture
+from combadge.capture import SnapshotCapture
 
 
 def make_helper(tmp_path, body):
@@ -74,10 +74,10 @@ def test_timeout_or_cancellation_stops_helper_and_cleans_directory(tmp_path, can
 
 
 def test_qnx_camera_uses_installed_helper_and_physical_unit(monkeypatch):
-    from commbadge.capture import qnx_camera_capture
+    from combadge.capture import qnx_camera_capture
 
-    monkeypatch.setattr("commbadge.capture.platform.system", lambda: "QNX")
-    monkeypatch.setattr("commbadge.capture.shutil.which", lambda _: "/opt/bin/combadge-camera")
+    monkeypatch.setattr("combadge.capture.platform.system", lambda: "QNX")
+    monkeypatch.setattr("combadge.capture.shutil.which", lambda _: "/opt/bin/combadge-camera")
     capture = qnx_camera_capture()
     assert capture.source == "camera"
     assert capture.command == [
@@ -91,18 +91,18 @@ def test_qnx_camera_uses_installed_helper_and_physical_unit(monkeypatch):
 
 
 def test_qnx_camera_does_not_fall_back_to_desktop_screenshot(monkeypatch):
-    from commbadge.capture import qnx_camera_capture
+    from combadge.capture import qnx_camera_capture
 
-    monkeypatch.setattr("commbadge.capture.platform.system", lambda: "Linux")
+    monkeypatch.setattr("combadge.capture.platform.system", lambda: "Linux")
     with pytest.raises(ValueError, match="QNX"):
         qnx_camera_capture()
 
 
 def test_qnx_camera_missing_build_has_actionable_error(monkeypatch):
-    from commbadge.capture import qnx_camera_capture
+    from combadge.capture import qnx_camera_capture
 
-    monkeypatch.setattr("commbadge.capture.platform.system", lambda: "QNX")
-    monkeypatch.setattr("commbadge.capture.shutil.which", lambda _: None)
-    monkeypatch.setattr("commbadge.capture.Path.is_file", lambda _: False)
+    monkeypatch.setattr("combadge.capture.platform.system", lambda: "QNX")
+    monkeypatch.setattr("combadge.capture.shutil.which", lambda _: None)
+    monkeypatch.setattr("combadge.capture.Path.is_file", lambda _: False)
     with pytest.raises(ValueError, match="make -C native/qnx-camera"):
         qnx_camera_capture()

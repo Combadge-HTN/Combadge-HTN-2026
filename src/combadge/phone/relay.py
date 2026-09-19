@@ -14,9 +14,9 @@ from http import HTTPStatus
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
 
-from commbadge.audio import FRAME_BYTES
-from commbadge.phone.carrier import TERMINAL, TwilioCarrier, valid_signature
-from commbadge.phone.codec import PhoneCodec
+from combadge.audio import FRAME_BYTES
+from combadge.phone.carrier import TERMINAL, TwilioCarrier, valid_signature
+from combadge.phone.codec import PhoneCodec
 
 
 async def send(ws, message):

@@ -14,6 +14,8 @@ Speaker identification uses standard-library HTTPS in a background thread; see [
 
 ## Audio interface
 
+Dan has written the Bluetooth and audio drivers, and speakers are available. See [Combadge-HTN/qnx-bluetooth](https://github.com/Combadge-HTN/qnx-bluetooth) for the Bluetooth work. Validate audible playback with the selected speakers using the native audio adapter below.
+
 `AudioIO` defines four asynchronous methods: `start()`, `read()`, `write(data)`, and `close()`. `CommandAudio` connects the session to capture and playback executables without invoking a shell. The default adapter uses the QNX ports of `arecord` and `aplay`. Ordinary pipes carry PCM; blocking reads and writes run in background threads. This avoids the QNX Python asynchronous write-pipe disconnect observed while the playback process was still running. Shutdown terminates the helpers to release blocked I/O.
 
 | Property | Contract |
@@ -28,7 +30,7 @@ Speaker identification uses standard-library HTTPS in a background thread; see [
 
 The client reads 960-byte frames (20 ms). Helpers may emit partial frames; input EOF is treated as a device failure. Playback buffering is bounded, and stalled output closes the session. Resample in the helper when hardware uses another sample rate.
 
-Check `arecord --help`, `aplay --help`, and `commbadge voice --list-devices` on the target. The supplied QNX USB audio image supports raw 24 kHz mono PCM through these tools. Run `commbadge voice` with the default backend. If these tools are absent, custom capture/playback helpers must use the selected audio interface's QNX driver. The presence of `wave` and `waverec` alone does not provide this raw streaming interface: their documented inputs and outputs are WAV files. Consult `use wave` and `use waverec` for the installed utilities' options.
+Check `arecord --help`, `aplay --help`, and `combadge voice --list-devices` on the target. The supplied QNX USB audio image supports raw 24 kHz mono PCM through these tools. Run `combadge voice` with the default backend. If these tools are absent, custom capture/playback helpers must use the selected audio interface's QNX driver. The presence of `wave` and `waverec` alone does not provide this raw streaming interface: their documented inputs and outputs are WAV files. Consult `use wave` and `use waverec` for the installed utilities' options.
 
 ## Camera capture
 
@@ -60,7 +62,7 @@ The included helper emits JPEGs no larger than 256 KiB. Larger images from other
 
 1. Confirm the capture and playback devices have QNX drivers and usable PCM endpoints.
 2. Record and play intelligible speech through the selected audio interface.
-3. Run `commbadge voice --check` to verify TLS, authentication, and generated audio.
+3. Run `combadge voice --check` to verify TLS, authentication, and generated audio.
 4. Run the voice client with both native helpers and verify conversational audio.
 5. Verify session shutdown, device disconnection, and network-loss handling.
 

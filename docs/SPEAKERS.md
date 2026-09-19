@@ -13,7 +13,7 @@ python -m pip install --no-deps -e .
 
 Prepare one clean, single-person WAV reference for each speaker: 2–10 seconds, PCM16, mono or stereo, 8–96 kHz. The application uses the first four seconds (or the whole clip if shorter), mixes stereo to mono, and preserves the sample rate. This keeps reference uploads below the API form-part size limit. Choose clearly audible speech from the start, with no other voices or music. Use recordings the speakers have agreed to enroll. Keep them outside source control; WAV files and `recordings/` are ignored by Git. No persistent voice profile is created remotely by this application.
 
-Add these options to your normal `commbadge voice` command:
+Add these options to your normal `combadge voice` command:
 
 ```sh
 --speaker Edmon=/path/to/edmon.wav --speaker Samuel=/path/to/samuel.wav
@@ -24,7 +24,7 @@ Up to four unique names are supported. References are loaded before the micropho
 For QNX, retain the command audio interface:
 
 ```sh
-commbadge voice --audio-backend commands \
+combadge voice --audio-backend commands \
   --capture-command '/path/to/capture-helper' \
   --playback-command '/path/to/playback-helper' \
   --speaker Edmon=/path/to/edmon.wav \
@@ -66,7 +66,7 @@ Diarization adds paid requests alongside Live. Overlapping windows and repeated 
 Use a different utterance from enrollment when evaluating accuracy. Analysis input must be mono PCM16 WAV at 24 kHz, between 0.1 and 30 seconds:
 
 ```sh
-commbadge speakers /path/to/conversation.wav \
+combadge speakers /path/to/conversation.wav \
   --speaker Edmon=/path/to/edmon.wav \
   --speaker Samuel=/path/to/samuel.wav
 ```

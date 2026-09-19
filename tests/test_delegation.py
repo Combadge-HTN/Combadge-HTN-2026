@@ -4,9 +4,9 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from commbadge.delegation import SnapshotDelegation
-from commbadge.shopify import ShoppingSession
-from commbadge.vision import MAX_SESSION_IMAGE_BYTES, ImageInput
+from combadge.delegation import SnapshotDelegation
+from combadge.shopify import ShoppingSession
+from combadge.vision import MAX_SESSION_IMAGE_BYTES, ImageInput
 
 
 def event(kind, **fields):

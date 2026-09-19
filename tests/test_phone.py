@@ -12,14 +12,14 @@ from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 from websockets.exceptions import InvalidStatus
 
-from commbadge.audio import FRAME_BYTES, SilenceAudio
-from commbadge.config import Settings
-from commbadge.live import session_config
-from commbadge.phone.carrier import TwilioCarrier, stream_twiml, valid_signature
-from commbadge.phone.client import call_contact
-from commbadge.phone.codec import PhoneCodec, decode_sample, encode_sample
-from commbadge.phone.config import PhoneSettings, RelaySettings
-from commbadge.phone.relay import PhoneRelay
+from combadge.audio import FRAME_BYTES, SilenceAudio
+from combadge.config import Settings
+from combadge.live import session_config
+from combadge.phone.carrier import TwilioCarrier, stream_twiml, valid_signature
+from combadge.phone.client import call_contact
+from combadge.phone.codec import PhoneCodec, decode_sample, encode_sample
+from combadge.phone.config import PhoneSettings, RelaySettings
+from combadge.phone.relay import PhoneRelay
 
 
 def settings():

@@ -10,8 +10,8 @@ import urllib.request
 import webbrowser
 from collections.abc import Callable
 
-from commbadge.shop_account import DOMAIN, ShopAccount
-from commbadge.vision import ImageInput
+from combadge.shop_account import DOMAIN, ShopAccount
+from combadge.vision import ImageInput
 
 CATALOG_URL = "https://catalog.shopify.com/api/ucp/mcp"
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024

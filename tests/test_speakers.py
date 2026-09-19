@@ -6,10 +6,10 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from commbadge.speakers import (
+from combadge.speakers import (
     BYTES_PER_SECOND as BPS,
 )
-from commbadge.speakers import (
+from combadge.speakers import (
     INSTRUCTIONS,
     Reference,
     Segment,
@@ -257,8 +257,8 @@ def test_auth_failure_disables_without_logging_secret():
 
 
 def test_configuration_opt_in():
-    from commbadge.config import Settings
-    from commbadge.live import session_config
+    from combadge.config import Settings
+    from combadge.live import session_config
 
     assert INSTRUCTIONS not in session_config(Settings())["instructions"]
     assert INSTRUCTIONS in session_config(Settings(), speakers=True)["instructions"]
@@ -311,8 +311,8 @@ def test_unacknowledged_context_is_bounded():
 def test_live_audio_continues_during_analysis_and_shutdown_cancels_it():
     from test_live import FakeAudio, FakeConnection, audio_event
 
-    from commbadge.config import Settings
-    from commbadge.live import run_session
+    from combadge.config import Settings
+    from combadge.live import run_session
 
     async def scenario():
         stop, entered, cancelled = asyncio.Event(), asyncio.Event(), asyncio.Event()
@@ -364,8 +364,8 @@ def test_live_audio_continues_during_analysis_and_shutdown_cancels_it():
 def test_live_receives_context_rejection_without_stopping_voice():
     from test_live import FakeAudio, FakeConnection, audio_event, event
 
-    from commbadge.config import Settings
-    from commbadge.live import run_session
+    from combadge.config import Settings
+    from combadge.live import run_session
 
     async def scenario():
         stop = asyncio.Event()
@@ -454,7 +454,7 @@ def test_three_transient_failures_disable_without_stopping_voice(monkeypatch):
             assert seconds in (2, 4)
             tracker.feed(PCM * 3)
 
-        monkeypatch.setattr("commbadge.speakers.asyncio.sleep", backoff)
+        monkeypatch.setattr("combadge.speakers.asyncio.sleep", backoff)
         tracker = SpeakerTracker(NS(analyze=analyze))
         tracker.feed(PCM * 6)
         task = asyncio.create_task(tracker.run(None, reports.put_nowait))
@@ -470,7 +470,7 @@ def test_three_transient_failures_disable_without_stopping_voice(monkeypatch):
 def test_http_adapter_multipart_contract_and_raw_transcript_excluded(monkeypatch):
     import base64
 
-    from commbadge.transcription import request
+    from combadge.transcription import request
 
     def open_request(req, timeout):
         assert req.full_url == "https://api.openai.com/v1/audio/transcriptions"
@@ -491,7 +491,7 @@ def test_http_adapter_multipart_contract_and_raw_transcript_excluded(monkeypatch
         return io.BytesIO(json.dumps(payload((0, 1, "Edmon"))).encode())
 
     monkeypatch.setattr(
-        "commbadge.transcription.urllib.request.build_opener", lambda *args: NS(open=open_request)
+        "combadge.transcription.urllib.request.build_opener", lambda *args: NS(open=open_request)
     )
     result = request(
         {
@@ -507,7 +507,7 @@ def test_http_adapter_multipart_contract_and_raw_transcript_excluded(monkeypatch
 def test_http_adapter_errors_do_not_expose_remote_body(monkeypatch, status):
     import urllib.error
 
-    from commbadge.transcription import request
+    from combadge.transcription import request
 
     def fail(*args, **kwargs):
         raise urllib.error.HTTPError(
@@ -515,17 +515,17 @@ def test_http_adapter_errors_do_not_expose_remote_body(monkeypatch, status):
         )
 
     monkeypatch.setattr(
-        "commbadge.transcription.urllib.request.build_opener", lambda *args: NS(open=fail)
+        "combadge.transcription.urllib.request.build_opener", lambda *args: NS(open=fail)
     )
     result = request({"api_key": "secret", "audio": "AA==", "references": []})
     assert result == {"status": status}
 
 
 def test_http_adapter_bounds_response_size(monkeypatch):
-    from commbadge.transcription import request
+    from combadge.transcription import request
 
     monkeypatch.setattr(
-        "commbadge.transcription.urllib.request.build_opener",
+        "combadge.transcription.urllib.request.build_opener",
         lambda *args: NS(open=lambda *a, **kw: io.BytesIO(b" " * 262145)),
     )
     assert request({"api_key": "secret", "audio": "AA==", "references": []}) == {
@@ -534,7 +534,7 @@ def test_http_adapter_bounds_response_size(monkeypatch):
 
 
 def test_http_response_continues_after_short_reads():
-    from commbadge.transcription import read_bounded
+    from combadge.transcription import read_bounded
 
     class ShortReads(io.BytesIO):
         def read(self, size=-1):
@@ -561,8 +561,8 @@ def test_cancelled_analysis_does_not_reuse_results_or_start_parallel_requests(
         assert release.wait(3)
         return {"result": payload((0, 1, "Edmon"))}
 
-    monkeypatch.setattr("commbadge.transcription.request", request)
-    monkeypatch.setattr("commbadge.speakers.REQUEST_TIMEOUT", 5 if cancel_request else 0.05)
+    monkeypatch.setattr("combadge.transcription.request", request)
+    monkeypatch.setattr("combadge.speakers.REQUEST_TIMEOUT", 5 if cancel_request else 0.05)
 
     async def scenario():
         client = Transcriber("secret", (Reference("Edmon", pcm_wav(PCM * 4)),))

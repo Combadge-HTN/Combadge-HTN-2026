@@ -4,11 +4,11 @@ import asyncio
 import json
 from contextlib import suppress
 
-from commbadge.audio import FRAME_BYTES
+from combadge.audio import FRAME_BYTES
 
 
 async def contacts(settings):
-    from commbadge.phone.config import SipSettings
+    from combadge.phone.config import SipSettings
 
     if isinstance(settings, SipSettings):
         return sorted(settings.contacts)
@@ -28,10 +28,10 @@ async def contacts(settings):
 
 async def call_contact(settings, contact, audio, *, seconds=300, report=print):
     """Audio is already started; caller owns its lifecycle. Cancellation hangs up."""
-    from commbadge.phone.config import SipSettings
+    from combadge.phone.config import SipSettings
 
     if isinstance(settings, SipSettings):
-        from commbadge.phone.direct import call_contact as direct_call
+        from combadge.phone.direct import call_contact as direct_call
 
         return await direct_call(settings, contact, audio, seconds=seconds, report=report)
     from websockets.asyncio.client import connect

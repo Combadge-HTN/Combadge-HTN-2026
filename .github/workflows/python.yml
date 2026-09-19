@@ -22,6 +22,6 @@ jobs:
       - run: uv run --no-sync ruff format --check .
       - run: uv run --no-sync pytest -vv -o faulthandler_timeout=30
         timeout-minutes: 2
-      - run: uv run --no-sync commbadge voice --help
-      - run: uv run --no-sync commbadge call --help
-      - run: uv run --no-sync commbadge phone-relay --help
+      - run: uv run --no-sync combadge voice --help
+      - run: uv run --no-sync combadge call --help
+      - run: uv run --no-sync combadge phone-relay --help

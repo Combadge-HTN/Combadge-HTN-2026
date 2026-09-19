@@ -7,7 +7,7 @@ from contextlib import suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from commbadge.vision import ImageInput
+from combadge.vision import ImageInput
 
 COSMIC_SCREENSHOT = [
     "cosmic-screenshot",
@@ -53,7 +53,7 @@ class SnapshotCapture:
 
     async def capture(self, question: str) -> ImageInput:
         self.preflight()
-        with TemporaryDirectory(prefix="commbadge-snapshot-") as directory:
+        with TemporaryDirectory(prefix="combadge-snapshot-") as directory:
             command = [arg.replace("{directory}", directory) for arg in self.command]
             process = await asyncio.create_subprocess_exec(
                 *command,

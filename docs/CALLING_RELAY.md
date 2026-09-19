@@ -60,7 +60,7 @@ store it securely on the relay and badge. Never commit credentials or contacts.
 Start the relay:
 
 ```sh
-commbadge phone-relay --env-file .env --host 127.0.0.1 --port 8765
+combadge phone-relay --env-file .env --host 127.0.0.1 --port 8765
 ```
 
 Expose that port through a TLS reverse proxy or HTTPS tunnel that supports
@@ -92,13 +92,13 @@ CALL_RELAY_TOKEN=...same token as relay...
 List configured contacts (does not place a call):
 
 ```sh
-commbadge call --list-contacts
+combadge call --list-contacts
 ```
 
 Place a human call using native PCM helpers on QNX:
 
 ```sh
-commbadge call alex --audio-backend commands \
+combadge call alex --audio-backend commands \
   --capture-command '/path/to/qnx-pcm-capture' \
   --playback-command '/path/to/qnx-pcm-playback'
 ```
@@ -111,7 +111,7 @@ To call through the assistant, add `--calls` to the working voice command, then
 say **“Call Alex.”** It also works alongside `--screenshots` or a camera helper:
 
 ```sh
-commbadge voice --calls --audio-backend commands \
+combadge voice --calls --audio-backend commands \
   --capture-command '/path/to/qnx-pcm-capture' \
   --playback-command '/path/to/qnx-pcm-playback' --max-seconds 900
 ```

@@ -1,8 +1,8 @@
 import os
 from unittest.mock import patch
 
-from commbadge.cli import main
-from commbadge.config import SHOPIFY_PROFILE_URL, load_settings
+from combadge.cli import main
+from combadge.config import SHOPIFY_PROFILE_URL, load_settings
 
 
 def test_environment_overrides_file_without_mutating_environment(tmp_path):

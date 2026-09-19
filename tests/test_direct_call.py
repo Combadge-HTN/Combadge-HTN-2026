@@ -3,11 +3,11 @@ from contextlib import suppress
 
 import pytest
 
-from commbadge.audio import SilenceAudio
-from commbadge.phone import direct
-from commbadge.phone.config import SipSettings
-from commbadge.phone.sip import Message, answer, digest, offer, read_message
-from commbadge.phone.srtp import Srtp
+from combadge.audio import SilenceAudio
+from combadge.phone import direct
+from combadge.phone.config import SipSettings
+from combadge.phone.sip import Message, answer, digest, offer, read_message
+from combadge.phone.srtp import Srtp
 
 
 def settings():

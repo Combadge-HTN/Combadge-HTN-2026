@@ -1,13 +1,13 @@
 # Hardware
 
-The Raspberry Pi 5 runs QNX 8.0. Audio interfaces require compatible QNX drivers and the [PCM transport](QNX.md#audio-interface).
+The Raspberry Pi 5 runs QNX 8.0. Dan has written the Bluetooth and audio drivers, and speakers are available. The client uses the [PCM transport](QNX.md#audio-interface).
 
 | Part | Role | What remains to check |
 | --- | --- | --- |
-| Raspberry Pi 5, QNX 8.0, Python 3.14 | Device compute and network | Audio drivers, power, and cooling |
+| Raspberry Pi 5, QNX 8.0, Python 3.14 | Device compute and network | Audio acceptance, power, and cooling |
 | LilyPad SimpleSnap Protoboard | Sewable connection/prototyping board | Whether the separate Arduino SimpleSnap controller is also present |
 | IMX708 camera on Pi connector 2 | Snapshot image input | JPEG capture tested on QNX unit 4; end-to-end voice trigger remains to check |
-| Speaker with 3.5 mm plug | Voice output | Whether it is powered/amplified; exact plug and power requirements |
+| Speakers (available) | Voice output through Dan's audio drivers | Validate audible playback from the voice client |
 | SparkFun Sound Detector | Analog microphone plus sound detection circuitry | Exact model, audio ADC/interface, levels, and coupling |
 | MPR121 capacitive touch sensor | Touch input for conversation activation | QNX driver tested; connection to the voice session is not yet implemented |
 | Vibration motor and driver | Haptic feedback | Not yet identified |
@@ -54,7 +54,7 @@ existing Python `SnapshotCapture` class and voice `--snapshot-command` option.
 
 ## MPR121 touch sensor
 
-The reusable driver is `commbadge.touch.MPR121` in `src/commbadge/touch.py`.
+The reusable driver is `combadge.touch.MPR121` in `src/combadge/touch.py`.
 It uses native QNX I2C calls and the system `rpi_gpio` module; no Adafruit or
 pip-installed GPIO packages are needed. Importing it does not access hardware.
 The driver has been tested on Raspberry Pi 5 with QNX 8 and Python 3.14,
@@ -90,7 +90,7 @@ so its output alone does not verify IRQ wiring.
 
 ```python
 import time
-from commbadge.touch import MPR121
+from combadge.touch import MPR121
 
 with MPR121(bus=1, address=0x5A, irq_pin=4) as sensor:
     while True:  # Use your application's stop condition.

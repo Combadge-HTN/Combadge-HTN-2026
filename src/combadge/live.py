@@ -10,14 +10,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from types import SimpleNamespace
 
-from commbadge.audio import FRAME_BYTES, RATE, AlsaAudio, AudioIO, CommandAudio, SilenceAudio
-from commbadge.capture import SnapshotCapture
-from commbadge.config import Settings
-from commbadge.delegation import SNAPSHOT_TOOL, SnapshotDelegation
-from commbadge.shopify import SHOP_ACCOUNT_TOOLS, SHOPPING_TOOLS, ShoppingSession
-from commbadge.speakers import INSTRUCTIONS as SPEAKER_INSTRUCTIONS
-from commbadge.speakers import SpeakerTracker
-from commbadge.vision import ImageInput
+from combadge.audio import FRAME_BYTES, RATE, AlsaAudio, AudioIO, CommandAudio, SilenceAudio
+from combadge.capture import SnapshotCapture
+from combadge.config import Settings
+from combadge.delegation import SNAPSHOT_TOOL, SnapshotDelegation
+from combadge.shopify import SHOP_ACCOUNT_TOOLS, SHOPPING_TOOLS, ShoppingSession
+from combadge.speakers import INSTRUCTIONS as SPEAKER_INSTRUCTIONS
+from combadge.speakers import SpeakerTracker
+from combadge.vision import ImageInput
 
 Report = Callable[[str], None]
 LIVE_URL = "wss://api.openai.com/v1/live/sessions"
@@ -228,7 +228,7 @@ def session_config(
         )
         backend["parallel_tool_calls"] = False
     if call_names:
-        from commbadge.phone.client import call_tool
+        from combadge.phone.client import call_tool
 
         config["instructions"] += (
             " The backend can call the user's contacts. Delegate explicit requests to call "
@@ -311,7 +311,7 @@ async def run_session(
     call_handler = None
     call_requested = asyncio.Event()
     if phone_settings is not None:
-        from commbadge.phone.client import contacts
+        from combadge.phone.client import contacts
 
         call_names = await contacts(phone_settings)
         if not call_names:
@@ -623,7 +623,7 @@ async def connect_voice(
             )
         # Both session.closed and the WebSocket close precede any telephone audio.
         if stats.phone_contact is not None and not stop.is_set():
-            from commbadge.phone.client import call_until_stopped
+            from combadge.phone.client import call_until_stopped
 
             print("GPT-Live disconnected. Starting the human phone call.", flush=True)
             result = await call_until_stopped(

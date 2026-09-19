@@ -49,7 +49,7 @@ The existing `SnapshotCapture` class manages the temporary output directory and
 loads the encoded image:
 
 ```python
-from commbadge.capture import SnapshotCapture
+from combadge.capture import SnapshotCapture
 
 camera = SnapshotCapture([
     "/absolute/path/to/Combadge-HTN-2026/native/qnx-camera/combadge-camera",
@@ -58,7 +58,7 @@ camera = SnapshotCapture([
 image = await camera.capture("What is in front of me?")
 ```
 
-Or append this option to your configured `commbadge voice` command:
+Or append this option to your configured `combadge voice` command:
 
 ```sh
 --snapshot-command '/absolute/path/to/Combadge-HTN-2026/native/qnx-camera/combadge-camera --unit 4 --output-dir {directory}'

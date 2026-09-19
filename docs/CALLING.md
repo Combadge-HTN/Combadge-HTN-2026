@@ -56,32 +56,32 @@ password, not the Twilio account Auth Token. No `CALL_RELAY_*` values are requir
 List contacts without network access or calling anyone:
 
 ```sh
-commbadge call --list-contacts
+combadge call --list-contacts
 ```
 
 Check system crypto and direct TLS/SIP connectivity without dialing or accessing
 audio devices (this does not verify the SIP password or media path):
 
 ```sh
-commbadge call --check
+combadge call --check
 ```
 
 With the QNX `arecord`/`aplay` ports and audio devices connected:
 
 ```sh
-commbadge call edmon
+combadge call edmon
 ```
 
 For custom PCM helpers:
 
 ```sh
-commbadge call edmon --audio-backend commands \
+combadge call edmon --audio-backend commands \
   --capture-command '/path/to/qnx-pcm-capture' \
   --playback-command '/path/to/qnx-pcm-playback'
 ```
 
 These helper paths are placeholders. See the [QNX audio contract](QNX.md).
-For voice-initiated calls, add `--calls` to the existing working `commbadge voice`
+For voice-initiated calls, add `--calls` to the existing working `combadge voice`
 command and say **“Computer, call Edmon.”**
 
 ## Shutdown and failure behavior

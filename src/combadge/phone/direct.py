@@ -7,10 +7,10 @@ import ssl
 import struct
 from contextlib import suppress
 
-from commbadge.audio import FRAME_BYTES
-from commbadge.phone.codec import PhoneCodec
-from commbadge.phone.sip import Message, answer, digest, offer, read_message, routes, tag, uri
-from commbadge.phone.srtp import Srtp, crypto, header_size
+from combadge.audio import FRAME_BYTES
+from combadge.phone.codec import PhoneCodec
+from combadge.phone.sip import Message, answer, digest, offer, read_message, routes, tag, uri
+from combadge.phone.srtp import Srtp, crypto, header_size
 
 
 class SipCall:

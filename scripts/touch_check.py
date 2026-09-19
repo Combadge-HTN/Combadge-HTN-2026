@@ -10,7 +10,7 @@ import math
 import sys
 import time
 
-from commbadge.touch import MPR121, QNXI2C
+from combadge.touch import MPR121, QNXI2C
 
 
 def diagnose(bus):

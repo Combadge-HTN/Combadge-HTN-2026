@@ -6,11 +6,11 @@ from unittest.mock import Mock, patch
 import pytest
 from test_shopify import VID, Catalog, product
 
-from commbadge.cli import main
-from commbadge.config import Settings
-from commbadge.live import session_config
-from commbadge.shop_account import ShopAccount, ShopError, TokenStore, checkout_summary
-from commbadge.shopify import ShoppingSession
+from combadge.cli import main
+from combadge.config import Settings
+from combadge.live import session_config
+from combadge.shop_account import ShopAccount, ShopError, TokenStore, checkout_summary
+from combadge.shopify import ShoppingSession
 
 
 def envelope():
@@ -73,7 +73,7 @@ def test_private_store_and_refresh_preserve_rotated_credentials(tmp_path):
     assert store.path.stat().st_mode & 0o777 == 0o600
     account = ShopAccount(store)
     with patch(
-        "commbadge.shop_account.request",
+        "combadge.shop_account.request",
         side_effect=[
             ShopError("expired", status=401),
             {"access_token": "new", "refresh_token": "rotated"},
@@ -91,7 +91,7 @@ def test_transient_auth_failure_does_not_refresh_or_delete_tokens(tmp_path):
     store = TokenStore(tmp_path / "auth.json")
     saved = {"access_token": "old", "refresh_token": "refresh"}
     store.write(saved)
-    with patch("commbadge.shop_account.request", side_effect=ShopError("offline")) as send:
+    with patch("combadge.shop_account.request", side_effect=ShopError("offline")) as send:
         with pytest.raises(ShopError, match="offline"):
             ShopAccount(store).access_token()
     assert send.call_count == 1 and store.read() == saved
@@ -102,7 +102,7 @@ def test_prepare_wire_only_creates_unpaid_checkout_with_merchant_scoped_token(tm
     with (
         patch.object(account, "access_token", return_value="account-token"),
         patch(
-            "commbadge.shop_account.request",
+            "combadge.shop_account.request",
             side_effect=[
                 {"access_token": "merchant-token"},
                 {"ip": "203.0.113.10"},
@@ -134,7 +134,7 @@ def test_prepare_wire_only_creates_unpaid_checkout_with_merchant_scoped_token(tm
     ],
 )
 def test_invalid_merchant_never_receives_credentials(domain):
-    with patch("commbadge.shop_account.request") as send, pytest.raises(ValueError):
+    with patch("combadge.shop_account.request") as send, pytest.raises(ValueError):
         ShopAccount().prepare(domain, VID, 1, "CA")
     send.assert_not_called()
 
@@ -144,7 +144,7 @@ def test_ambiguous_create_failure_is_not_retried(tmp_path):
     with (
         patch.object(account, "access_token", return_value="account-token"),
         patch(
-            "commbadge.shop_account.request",
+            "combadge.shop_account.request",
             side_effect=[
                 {"access_token": "merchant-token"},
                 {"ip": "203.0.113.10"},
@@ -160,9 +160,9 @@ def test_ambiguous_create_failure_is_not_retried(tmp_path):
 def test_sign_in_obeys_polling_and_stores_only_tokens(tmp_path):
     account = ShopAccount(TokenStore(tmp_path / "auth.json"))
     with (
-        patch("commbadge.shop_account.time.sleep") as sleep,
+        patch("combadge.shop_account.time.sleep") as sleep,
         patch(
-            "commbadge.shop_account.request",
+            "combadge.shop_account.request",
             side_effect=[
                 {
                     "verification_uri_complete": "https://accounts.shop.app/oauth/device_code?code=test",
@@ -223,7 +223,7 @@ def test_account_cli_rejects_incompatible_options(args):
 
 
 def test_delegation_returns_saved_checkout_to_voice_and_rejects_browser_tool():
-    from commbadge.delegation import FunctionCall, SnapshotDelegation
+    from combadge.delegation import FunctionCall, SnapshotDelegation
 
     async def scenario():
         completed = asyncio.Event()
@@ -279,7 +279,7 @@ def test_checkout_trace_retains_retrieval_evidence_without_buyer_or_payment_data
     )
     with (
         patch.object(account, "_merchant_access", return_value=("private-token", "203.0.113.10")),
-        patch("commbadge.shop_account.request", return_value=response),
+        patch("combadge.shop_account.request", return_value=response),
     ):
         result = account.prepare("bottles.myshopify.com", VID, 1, "CA")
     assert result["app_visibility"] == "unverified"
@@ -302,7 +302,7 @@ def test_trace_records_uncertain_outcome_and_does_not_repeat_create(tmp_path):
     account = ShopAccount(TokenStore(tmp_path / "auth.json"))
     with (
         patch.object(account, "_merchant_access", return_value=("token", "203.0.113.10")),
-        patch("commbadge.shop_account.request", side_effect=ShopError("timeout")) as send,
+        patch("combadge.shop_account.request", side_effect=ShopError("timeout")) as send,
     ):
         with pytest.raises(ShopError, match="Trace:"):
             account.prepare("bottles.myshopify.com", VID, 1, "CA")
@@ -321,7 +321,7 @@ def test_trace_records_merchant_errors_even_when_summary_rejects_response(tmp_pa
     ]
     with (
         patch.object(account, "_merchant_access", return_value=("token", "203.0.113.10")),
-        patch("commbadge.shop_account.request", return_value=response),
+        patch("combadge.shop_account.request", return_value=response),
     ):
         with pytest.raises(ShopError):
             account.prepare("bottles.myshopify.com", VID, 1, "CA")
@@ -342,7 +342,7 @@ def test_refresh_reads_checkout_without_creating_one_and_preserves_original_resp
     )
     with (
         patch.object(account, "_merchant_access", return_value=("token", "203.0.113.10")),
-        patch("commbadge.shop_account.request", return_value=envelope()) as send,
+        patch("combadge.shop_account.request", return_value=envelope()) as send,
     ):
         refreshed = account.traces(trace_id, refresh=True)[0]
     params = send.call_args.kwargs["payload"]["params"]
@@ -353,7 +353,7 @@ def test_refresh_reads_checkout_without_creating_one_and_preserves_original_resp
 
 
 def test_trace_cli_is_offline_unless_refresh_requested(tmp_path, capsys):
-    with patch("commbadge.shop_account.request") as send:
+    with patch("combadge.shop_account.request") as send:
         assert main(["shop-account", "trace", "--auth-file", str(tmp_path / "auth.json")]) == 0
     send.assert_not_called()
     assert json.loads(capsys.readouterr().out) == []

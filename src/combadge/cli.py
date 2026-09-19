@@ -11,11 +11,11 @@ import subprocess
 from importlib.metadata import version
 from pathlib import Path
 
-from commbadge.capture import COSMIC_SCREENSHOT, SnapshotCapture, qnx_camera_capture
-from commbadge.config import load_settings
-from commbadge.shop_account import DEFAULT_AUTH_FILE, ShopAccount, TokenStore
-from commbadge.shopify import CatalogClient, ShoppingSession
-from commbadge.vision import DEFAULT_QUESTION, ImageInput
+from combadge.capture import COSMIC_SCREENSHOT, SnapshotCapture, qnx_camera_capture
+from combadge.config import load_settings
+from combadge.shop_account import DEFAULT_AUTH_FILE, ShopAccount, TokenStore
+from combadge.shopify import CatalogClient, ShoppingSession
+from combadge.vision import DEFAULT_QUESTION, ImageInput
 
 
 def positive_seconds(value: str) -> float:
@@ -26,8 +26,8 @@ def positive_seconds(value: str) -> float:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="commbadge", description=__doc__)
-    parser.add_argument("--version", action="version", version=version("htn-commbadge"))
+    parser = argparse.ArgumentParser(prog="combadge", description=__doc__)
+    parser.add_argument("--version", action="version", version=version("htn-combadge"))
     commands = parser.add_subparsers(dest="command", required=True)
     doctor = commands.add_parser("doctor", help="show configuration and audio tool availability")
     doctor.add_argument("--env-file", type=Path, default=Path(".env"))
@@ -78,8 +78,8 @@ def main(argv: list[str] | None = None) -> int:
         "--snapshot-command", help="image capture helper with {directory} placeholder (no shell)"
     )
     voice.add_argument("--calls", action="store_true", help="enable human phone calls via a relay")
-    from commbadge.phone.cli import register
-    from commbadge.phone.cli import run as run_phone
+    from combadge.phone.cli import register
+    from combadge.phone.cli import run as run_phone
 
     register(commands)
     voice.add_argument(
@@ -124,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in ("voice", "speakers") and args.speaker:
         if args.command == "voice" and (args.check or args.list_devices):
             parser.error("--speaker requires a voice session")
-        from commbadge.speakers import SpeakerTracker, Transcriber, load_references, read_wav
+        from combadge.speakers import SpeakerTracker, Transcriber, load_references, read_wav
 
         try:
             references = load_references(args.speaker)
@@ -134,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "voice" and args.calls:
         if args.check or args.list_devices:
             parser.error("--calls requires a voice session")
-        from commbadge.phone.config import PhoneSettings
+        from combadge.phone.config import PhoneSettings
 
         try:
             phone_settings = PhoneSettings.load(args.env_file)
@@ -297,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
                 1, "Add OPENAI_API_KEY to .env or your environment before starting voice.\n"
             )
         try:
-            from commbadge.live import connect_voice
+            from combadge.live import connect_voice
 
             print("Connecting to GPT-Live. This uses paid API credits; Ctrl+C ends the session.")
             asyncio.run(
@@ -352,6 +352,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {name}: {status}")
     if host == "QNX":
         print("Audio: arecord/aplay, or custom PCM helpers; see docs/QNX.md.")
-    print("API check: commbadge voice --check")
-    print("Voice options: commbadge voice --help")
+    print("API check: combadge voice --check")
+    print("Voice options: combadge voice --help")
     return 0

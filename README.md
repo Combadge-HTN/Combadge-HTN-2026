@@ -10,6 +10,8 @@ A wearable voice assistant named **Computer** for Raspberry Pi 5 running QNX 8.0
 
 The voice client, camera capture, and network integrations run on QNX. The default audio adapter uses the QNX ports of `arecord` and `aplay`. Physical microphone/speaker acceptance is required for each audio device.
 
+Dan has written the Bluetooth and audio drivers, and speakers are available. Bluetooth development lives in [Combadge-HTN/qnx-bluetooth](https://github.com/Combadge-HTN/qnx-bluetooth).
+
 ## Setup
 
 From the repository root on the Pi:
@@ -31,14 +33,14 @@ Runtime dependencies are pinned in `requirements-voice.txt`, exported from `uv.l
 With a microphone and speaker connected to the QNX audio device:
 
 ```sh
-commbadge voice --list-devices
-commbadge voice
+combadge voice --list-devices
+combadge voice
 ```
 
 Use `--input-device` and `--output-device` to select devices other than `default`. For a board image without `arecord`/`aplay`, supply custom raw PCM helpers:
 
 ```sh
-commbadge voice --audio-backend commands \
+combadge voice --audio-backend commands \
   --capture-command '/path/to/capture-helper' \
   --playback-command '/path/to/playback-helper'
 ```
@@ -47,7 +49,7 @@ These paths are placeholders for custom helpers; they are unnecessary when the n
 
 Press **Ctrl+C** to end the session. Sessions default to five minutes; use `--max-seconds 60` to change the limit. Add `--no-captions` to hide transcripts. The client saves no audio or transcript files. Acoustic echo cancellation must be handled by the audio path.
 
-`commbadge doctor` reports configuration and audio utility availability. `commbadge voice --check` verifies API access and generated audio without opening audio devices; it consumes API credits.
+`combadge doctor` reports configuration and audio utility availability. `combadge voice --check` verifies API access and generated audio without opening audio devices; it consumes API credits.
 
 ## Speaker identification (prototype)
 
@@ -58,7 +60,7 @@ Add `--speaker Edmon=/path/to/edmon.wav --speaker Samuel=/path/to/samuel.wav` to
 Add a still image and question to the voice command:
 
 ```sh
-commbadge voice --audio-backend commands \
+combadge voice --audio-backend commands \
   --capture-command '/path/to/capture-helper' \
   --playback-command '/path/to/playback-helper' \
   --image /path/to/image.png \
@@ -72,12 +74,12 @@ GPT-Live limits backend input history to 4 MiB per session, including base64 ima
 To check image delegation without opening audio devices:
 
 ```sh
-commbadge voice --check --image /path/to/image.png --question 'Describe this image.'
+combadge voice --check --image /path/to/image.png --question 'Describe this image.'
 ```
 
 The image check defaults to 45 seconds and finishes when backend analysis completes and non-silent audio arrives afterward. It checks the API path, not answer accuracy, complete speech, or physical playback. Timings report backend completion and first non-silent audio received after completion, measured from image submission; acknowledgments can affect the audio measurement. Use a spoken conversation to verify the answer itself.
 
-The camera integration boundary is `ImageInput.from_bytes(encoded_image, question)` in `src/commbadge/vision.py`. It accepts the same encoded image bytes as file input.
+The camera integration boundary is `ImageInput.from_bytes(encoded_image, question)` in `src/combadge/vision.py`. It accepts the same encoded image bytes as file input.
 
 ## Voice-triggered capture
 
@@ -87,7 +89,7 @@ For the QNX Pi camera, build the helper once and enable camera capture:
 
 ```sh
 make -C native/qnx-camera
-commbadge voice --camera --audio-backend commands \
+combadge voice --camera --audio-backend commands \
   --capture-command '/path/to/capture-helper' \
   --playback-command '/path/to/playback-helper'
 ```
@@ -112,7 +114,7 @@ For COSMIC screen capture:
 
 ```sh
 python -m pip install -e '.[images]'
-commbadge voice --screenshots
+combadge voice --screenshots
 ```
 
 This uses `cosmic-screenshot` through the desktop screenshot portal. Allow its screen-capture permission prompt if shown. Each requested screenshot is sent to OpenAI for analysis. Capture is opt-in for the session; it is not continuous recording. Capture failures are returned to the assistant, and capture helpers time out after 30 seconds. `--screenshots` and `--snapshot-command` are mutually exclusive and require a voice session rather than `--check`.
@@ -120,7 +122,7 @@ This uses `cosmic-screenshot` through the desktop screenshot portal. Allow its s
 ## Human phone calls
 
 Configure a Twilio SIP trunk to speak directly to another person through the badge.
-Use `commbadge call alex` for a standalone call, or add `--calls` to a voice session
+Use `combadge call alex` for a standalone call, or add `--calls` to a voice session
 and say “Call Alex.” Contact names and numbers are configured on the badge.
 
 The badge connects directly to Twilio using TLS and encrypted SRTP audio; no relay
@@ -133,7 +135,7 @@ QNX requirements, hang-up behavior, and validation limits. Calls use Twilio cred
 Enable product discovery and checkout handoff with `--shopify`:
 
 ```sh
-commbadge voice --shopify --snapshot-command '/path/to/camera-helper --output-dir {directory}'
+combadge voice --shopify --snapshot-command '/path/to/camera-helper --output-dir {directory}'
 ```
 
 Say **“Find something like this on Shopify under fifty dollars.”** The badge captures the requested view, searches Shopify's Global Catalog using the image and your preferences, and compares relevant offers. Follow up with **“Is the first one available in blue?”** or **“Find a cheaper one.”** The most recent image is reused until you request a new capture. A shopping image is sent to both OpenAI and Shopify.
@@ -141,14 +143,14 @@ Say **“Find something like this on Shopify under fifty dollars.”** The badge
 Connect your personal Shop account once:
 
 ```sh
-commbadge shop-account login
-commbadge shop-account status
+combadge shop-account login
+combadge shop-account status
 ```
 
 Open the sign-in link on your phone and approve the connection. The command waits for approval. Then add `--shop-account` to the voice command:
 
 ```sh
-commbadge voice --shopify --shop-account \
+combadge voice --shopify --shop-account \
   --audio-backend commands \
   --capture-command '/path/to/capture-helper' \
   --playback-command '/path/to/playback-helper' \
@@ -159,9 +161,9 @@ Say **“Computer, find something like this under fifty dollars.”** Select a s
 
 Computer reports returned checkout totals and warns when shipping exceeds the item subtotal. Missing shipping/tax amounts are not assumed to be zero. Changed offers require a new confirmation. If a request fails with an uncertain outcome, inspect the trace before retrying to avoid duplicate checkouts. The app exposes no payment or order-completion operation.
 
-For screen capture, use `commbadge voice --shopify --shop-account --screenshots`. Account mode does not open a browser. The separate guest flow remains available with `--shopify --open-checkout`, which opens a merchant checkout link instead; these modes cannot be combined.
+For screen capture, use `combadge voice --shopify --shop-account --screenshots`. Account mode does not open a browser. The separate guest flow remains available with `--shopify --open-checkout`, which opens a merchant checkout link instead; these modes cannot be combined.
 
-Credentials are stored in `~/.local/state/commbadge/shop-auth.json`, with owner-only file permissions, outside the repository. This is a plaintext credential file, not a keychain. Tokens are refreshed when needed. Use `--auth-file PATH` on `shop-account` and `--shop-auth-file PATH` on `voice` to choose another private location. `commbadge shop-account logout` deletes local credentials; revoke the agent in Shop to remove its account access. Credentials, addresses and payment details are never sent to the voice model. The merchant receives a scoped token and the buyer's public network address (resolved through ipify) for checkout authentication and risk checks.
+Credentials are stored in `~/.local/state/commbadge/shop-auth.json`, with owner-only file permissions, outside the repository. This is a plaintext credential file, not a keychain. Tokens are refreshed when needed. Use `--auth-file PATH` on `shop-account` and `--shop-auth-file PATH` on `voice` to choose another private location. `combadge shop-account logout` deletes local credentials; revoke the agent in Shop to remove its account access. Credentials, addresses and payment details are never sent to the voice model. The merchant receives a scoped token and the buyer's public network address (resolved through ipify) for checkout authentication and risk checks.
 
 The account adapter uses Python's standard library and needs no Node.js runtime. Target networking and TLS have been verified on QNX. This integration uses Shopify's personal-agent flow for an individual's connected account; broader product distribution requires confirming Shopify's applicable terms and access requirements.
 
@@ -170,8 +172,8 @@ The account adapter uses Python's standard library and needs no Node.js runtime.
 Every account checkout attempt prints a `Shop trace: <id>` and records an owner-only JSON file in `shop-traces/` alongside the selected Shop credential file (default `~/.local/state/commbadge/shop-traces/`). Traces retain the merchant, requested variant and quantity, stage, timestamp, merchant checkout ID, checkout status, diagnostic codes, totals and continuation URL when provided. No audio, screenshots, credentials, buyer contact details, addresses or payment objects are recorded. Checkout IDs and continuation URLs are private and omitted from terminal trace output.
 
 ```sh
-commbadge shop-account trace
-commbadge shop-account trace --trace-id TRACE_ID --refresh
+combadge shop-account trace
+combadge shop-account trace --trace-id TRACE_ID --refresh
 ```
 
 The first command lists the ten most recent traces without network access. `--refresh` calls only `get_checkout` on the recorded merchant; it does not create a checkout, alter a cart, or submit payment. Creation evidence is preserved separately from the refreshed state. Neither result proves visibility in the phone app. Raw trace files contain private checkout access information; avoid sharing them publicly. Attempts made before tracing was implemented cannot be recovered from the console transcript alone.
@@ -181,9 +183,9 @@ Search defaults to products shipping to Canada with CAD prices. `SHOPIFY_COUNTRY
 You can also use a supplied photo or search by description:
 
 ```sh
-commbadge voice --shopify --image /path/to/product.jpg --question 'Find a similar item under CAD 50'
-commbadge shop 'blue insulated bottle' --max-price 5000
-commbadge shop 'a bottle like this' --image /path/to/product.jpg
+combadge voice --shopify --image /path/to/product.jpg --question 'Find a similar item under CAD 50'
+combadge shop 'blue insulated bottle' --max-price 5000
+combadge shop 'a bottle like this' --image /path/to/product.jpg
 ```
 
 `shop` outputs JSON; its price limit is in cents. It does not require an OpenAI key. Shopify discovery uses a public UCP capability profile and does not require a merchant Admin API token. The default profile is an immutable copy of `docs/ucp-agent.json` served as JSON from the project's public repository through jsDelivr. Override `SHOPIFY_AGENT_PROFILE_URL` to host your own profile at an HTTPS URL serving `application/json`; GitHub raw's `text/plain` response is rejected by the catalog. Shopping tools are opt-in and cannot be combined with the voice `--check` flag.
@@ -205,7 +207,7 @@ The client uses the GPT-Live WebSocket protocol with Responses delegation. `--ca
 
 ## Documentation
 
-- [MPR121 touch input](docs/HARDWARE.md#mpr121-touch-sensor): reusable `commbadge.touch` driver and continuous-state hardware check.
+- [MPR121 touch input](docs/HARDWARE.md#mpr121-touch-sensor): reusable `combadge.touch` driver and continuous-state hardware check.
 - [QNX integration](docs/QNX.md): runtime and audio interface.
 - [Hardware](docs/HARDWARE.md): components and electrical requirements.
 - [Project plan](PROJECT_PLAN.md): architecture and upcoming features.

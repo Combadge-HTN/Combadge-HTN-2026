@@ -1,7 +1,7 @@
 import asyncio
 import sys
 
-from commbadge.audio import FRAME_BYTES, CommandAudio
+from combadge.audio import FRAME_BYTES, CommandAudio
 
 
 def test_native_helper_contract_handles_partial_reads_and_stops_processes(tmp_path):
@@ -43,20 +43,20 @@ def test_native_helper_contract_handles_partial_reads_and_stops_processes(tmp_pa
 
 
 def test_alsa_preflight_accepts_qnx_tools(monkeypatch):
-    from commbadge.audio import AlsaAudio
+    from combadge.audio import AlsaAudio
 
     monkeypatch.setattr(sys, "platform", "qnx8")
-    monkeypatch.setattr("commbadge.audio.shutil.which", lambda name: f"/system/bin/{name}")
+    monkeypatch.setattr("combadge.audio.shutil.which", lambda name: f"/system/bin/{name}")
     AlsaAudio().preflight()
 
 
 def test_alsa_preflight_requires_both_tools(monkeypatch):
     import pytest
 
-    from commbadge.audio import AlsaAudio
+    from combadge.audio import AlsaAudio
 
     monkeypatch.setattr(
-        "commbadge.audio.shutil.which", lambda name: None if name == "aplay" else name
+        "combadge.audio.shutil.which", lambda name: None if name == "aplay" else name
     )
     with pytest.raises(RuntimeError, match="aplay is missing"):
         AlsaAudio().preflight()

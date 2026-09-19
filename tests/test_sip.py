@@ -3,8 +3,8 @@ import struct
 
 import pytest
 
-from commbadge.phone.sip import Message, answer, digest, offer, read_message
-from commbadge.phone.srtp import Srtp, aes_ctr, derive
+from combadge.phone.sip import Message, answer, digest, offer, read_message
+from combadge.phone.srtp import Srtp, aes_ctr, derive
 
 MASTER = bytes.fromhex("E1F97A0D3E018BE0D64FA32C06DE41390EC675AD498AFEEBB6960B3AABE6")
 
@@ -111,8 +111,8 @@ def test_sip_parser_rejects_ambiguous_or_large_lengths(length):
 
 
 def test_direct_settings_do_not_need_relay_or_account_credentials(tmp_path, monkeypatch):
-    from commbadge.phone.client import contacts
-    from commbadge.phone.config import PhoneSettings, SipSettings
+    from combadge.phone.client import contacts
+    from combadge.phone.config import PhoneSettings, SipSettings
 
     for key in (
         "CALL_TRANSPORT",
@@ -141,7 +141,7 @@ def test_direct_settings_do_not_need_relay_or_account_credentials(tmp_path, monk
 
 
 def test_dialog_tags_and_combined_record_routes():
-    from commbadge.phone.sip import routes, tag
+    from combadge.phone.sip import routes, tag
 
     assert tag("<sip:peer@example.com>;tag=abcd") == "abcd"
     assert tag("<sip:peer@example.com>;tag=abc") != "abcd"

@@ -12,7 +12,7 @@ import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from commbadge.audio import RATE
+from combadge.audio import RATE
 
 REQUEST_TIMEOUT = 8
 BYTES_PER_SECOND = RATE * 2
@@ -176,7 +176,7 @@ class Transcriber:
         self.pending: asyncio.Task | None = None
 
     async def analyze(self, pcm: bytes) -> list[Segment]:
-        from commbadge.transcription import request
+        from combadge.transcription import request
 
         if not pcm or len(pcm) % 2 or len(pcm) > BYTES_PER_SECOND * 30:
             raise ValueError("Speaker analysis requires 0–30 seconds of PCM16 audio")

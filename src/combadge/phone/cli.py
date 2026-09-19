@@ -5,8 +5,8 @@ import asyncio
 import shlex
 from pathlib import Path
 
-from commbadge.audio import AlsaAudio, CommandAudio
-from commbadge.phone.config import PhoneSettings, RelaySettings
+from combadge.audio import AlsaAudio, CommandAudio
+from combadge.phone.config import PhoneSettings, RelaySettings
 
 
 def register(commands):
@@ -34,17 +34,17 @@ def register(commands):
 def run(args, parser: argparse.ArgumentParser):
     try:
         if args.command == "phone-relay":
-            from commbadge.phone.relay import PhoneRelay
+            from combadge.phone.relay import PhoneRelay
 
             settings = RelaySettings.load(args.env_file)
             asyncio.run(PhoneRelay(settings).run(args.host, args.port))
         else:
-            from commbadge.phone.client import call_contact, contacts
+            from combadge.phone.client import call_contact, contacts
 
             settings = PhoneSettings.load(args.env_file)
             if args.check:
-                from commbadge.phone.config import SipSettings
-                from commbadge.phone.direct import check_connection
+                from combadge.phone.config import SipSettings
+                from combadge.phone.direct import check_connection
 
                 if not isinstance(settings, SipSettings):
                     parser.error("call --check requires CALL_TRANSPORT=sip")

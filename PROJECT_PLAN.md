@@ -15,7 +15,7 @@ Still images and questions can be submitted to the managed Responses backend thr
 
 ## Milestones
 
-1. Implement QNX capture/playback helpers and complete a spoken conversation on the Pi.
+1. Complete a spoken conversation on the Pi with the available speakers and Dan's Bluetooth/audio drivers; native QNX capture/playback streaming is implemented.
 2. Add chest activation and distinct haptic feedback for listening, completion, and failure.
 3. Add a Browserbase workflow that executes a task and returns its result by voice.
 4. Add Shopify product matching, clarification of ambiguous requests, and draft orders.

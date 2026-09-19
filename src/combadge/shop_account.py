@@ -16,6 +16,7 @@ from pathlib import Path
 CLIENT_ID = "5c733ab2-1903-400a-891e-7ba20c09e2a3"
 PROFILE = "https://shopify.dev/ucp/agent-profiles/2026-04-08/personal_agent.json"
 AUTH = "https://accounts.shop.app/oauth"
+# Preserve existing credentials and traces across the CLI/package rename.
 DEFAULT_AUTH_FILE = Path.home() / ".local/state/commbadge/shop-auth.json"
 DOMAIN = re.compile(r"[a-z0-9][a-z0-9-]*\.myshopify\.com\Z")
 VARIANT = re.compile(r"gid://shopify/ProductVariant/[0-9]+\Z")
@@ -235,7 +236,7 @@ class ShopAccount:
         saved = self.store.read()
         access = saved.get("access_token")
         if not isinstance(access, str) or not access:
-            raise ShopError("Connect your Shop account first: commbadge shop-account login")
+            raise ShopError("Connect your Shop account first: combadge shop-account login")
         try:
             request(f"{AUTH}/userinfo", token=access)
             return access
@@ -244,7 +245,7 @@ class ShopAccount:
                 raise
         refresh = saved.get("refresh_token")
         if not isinstance(refresh, str) or not refresh:
-            raise ShopError("Shop sign-in expired. Run commbadge shop-account login again.")
+            raise ShopError("Shop sign-in expired. Run combadge shop-account login again.")
         try:
             tokens = request(
                 f"{AUTH}/token",

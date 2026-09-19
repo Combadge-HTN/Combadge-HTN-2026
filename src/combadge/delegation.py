@@ -5,9 +5,9 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from commbadge.capture import SnapshotCapture
-from commbadge.shopify import ShoppingSession
-from commbadge.vision import ImageBudget
+from combadge.capture import SnapshotCapture
+from combadge.shopify import ShoppingSession
+from combadge.vision import ImageBudget
 
 SNAPSHOT_TOOL = {
     "type": "function",

@@ -3,8 +3,8 @@
 python-dotenv==1.2.3 \
     --hash=sha256:904552145e8bfed22162c09dab1c2b9b54fefa7b23ba780f4f26ca0316b0f0d9 \
     --hash=sha256:a20a594dabeaa385725aa239d5244871c143ecb356add8a20fcf23773a6c3a35
-    # via htn-commbadge
+    # via htn-combadge
 websockets==15.0.1 \
     --hash=sha256:82544de02076bafba038ce055ee6412d68da13ab47f0c60cab827346de828dee \
     --hash=sha256:f7a866fbc1e97b5c617ee4116daaa09b722101d4a3c170c787450ba409f9736f
-    # via htn-commbadge
+    # via htn-combadge

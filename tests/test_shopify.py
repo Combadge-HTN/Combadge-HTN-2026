@@ -7,8 +7,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from commbadge.shopify import CatalogClient, ShoppingSession, https_url
-from commbadge.vision import ImageInput
+from combadge.shopify import CatalogClient, ShoppingSession, https_url
+from combadge.vision import ImageInput
 
 PROFILE = "https://example.com/ucp-agent.json"
 PID = "gid://shopify/p/bottle"
