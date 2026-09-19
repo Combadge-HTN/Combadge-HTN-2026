@@ -60,7 +60,16 @@ class SnapshotCapture:
                     raise RuntimeError(
                         "Capture must produce one image; it may have been cancelled."
                     )
-                return ImageInput.from_file(files[0], question)
+                # Decoding/resizing must not block the audio event loop. Keep the directory
+                # alive until the worker finishes, including when the session is cancelled.
+                conversion = asyncio.create_task(
+                    asyncio.to_thread(ImageInput.from_file, files[0], question)
+                )
+                try:
+                    return await asyncio.shield(conversion)
+                except asyncio.CancelledError:
+                    await asyncio.gather(conversion, return_exceptions=True)
+                    raise
             finally:
                 if process.returncode is None:
                     with suppress(ProcessLookupError):

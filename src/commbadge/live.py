@@ -235,6 +235,8 @@ async def run_session(
         if snapshot_capture is not None or shopping is not None
         else None
     )
+    if snapshots is not None and image is not None:
+        snapshots.image_budget.add(image)
 
     async def send_audio() -> None:
         while True:

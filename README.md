@@ -53,7 +53,9 @@ commbadge voice --audio-backend commands \
   --question 'What is shown in this image?'
 ```
 
-The application sends the image once to the configured vision-capable Responses backend. GPT-Live speaks about the findings, and subsequent voice questions can refer to the same image. This uses a still image, not a continuous camera feed. JPEG, PNG, and WebP inputs up to 5 MiB are accepted. Image contents are sent to OpenAI; no public image URL is required.
+The application sends the image once to the configured vision-capable Responses backend. GPT-Live speaks about the findings, and subsequent voice questions can refer to the same image. This uses a still image, not a continuous camera feed. JPEG, PNG, and WebP source files up to 20 MiB are accepted. With the optional `images` extra installed (`python -m pip install -e '.[images]'`), files larger than 256 KiB are resized without cropping and compressed to JPEG before upload. Without that extra, the capture helper must supply an encoded image no larger than 256 KiB. Image contents are sent to OpenAI; no public image URL is required.
+
+GPT-Live limits backend input history to 4 MiB per session, including base64 image data. The app limits each encoded image to 256 KiB and reserves at most 2 MiB of history for image messages, leaving space for conversation and tool results. When the image budget fills, further captures return an error to the assistant without uploading another image; restart the voice session to continue capturing. Long conversations can also reach the service's item/history limits.
 
 To check image delegation without opening audio devices:
 
@@ -80,6 +82,7 @@ The helper must write exactly one JPEG, PNG, or WebP into `{directory}` and exit
 For COSMIC screen capture:
 
 ```sh
+python -m pip install -e '.[images]'
 commbadge voice --screenshots
 ```
 

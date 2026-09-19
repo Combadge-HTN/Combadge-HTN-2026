@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from commbadge.capture import SnapshotCapture
 from commbadge.shopify import ShoppingSession
+from commbadge.vision import ImageBudget
 
 SNAPSHOT_TOOL = {
     "type": "function",
@@ -48,6 +49,7 @@ class SnapshotDelegation:
         self.connection = connection
         self.capture = capture
         self.shopping = shopping
+        self.image_budget = ImageBudget()
         self.report = report
         self.active: dict[str, str] = {}
         self.pending: dict[str, list[FunctionCall]] = {}
@@ -102,7 +104,9 @@ class SnapshotDelegation:
                         self.report("\nCapturing a fresh image…\n")
                         if self.shopping is not None:
                             self.shopping.image = None
-                        image = await self.capture.capture(args["question"])
+                        captured = await self.capture.capture(args["question"])
+                        self.image_budget.add(captured)
+                        image = captured
                         if self.shopping is not None:
                             self.shopping.image = image
                         result = {"status": "captured", "image_id": call.call_id}

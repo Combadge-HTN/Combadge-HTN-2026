@@ -6,7 +6,7 @@ import pytest
 
 from commbadge.delegation import SnapshotDelegation
 from commbadge.shopify import ShoppingSession
-from commbadge.vision import ImageInput
+from commbadge.vision import MAX_SESSION_IMAGE_BYTES, ImageInput
 
 
 def event(kind, **fields):
@@ -136,6 +136,28 @@ def test_returns_all_function_results_before_continuation():
     ]
     assert outputs == ["c1", "c2"]
     assert connection.messages[-1] == {"type": "response.create"}
+
+
+def test_full_image_budget_reports_error_and_continues_without_sending_image():
+    async def scenario():
+        connection, capture = Connection(), Capture()
+        delegation = SnapshotDelegation(connection, capture, lambda _: None)
+        delegation.image_budget.used_bytes = MAX_SESSION_IMAGE_BYTES
+        delegation.observe(event("response.created", response=NS(id="r1")))
+        delegation.observe(call())
+        delegation.observe(event("response.completed", response=NS(id="r1")))
+        worker = asyncio.create_task(delegation.run())
+        try:
+            await asyncio.wait_for(connection.continued.wait(), 1)
+            assert len(connection.messages) == 2
+            result = json.loads(connection.messages[0]["item"]["output"])
+            assert result["status"] == "failed" and "Restart" in result["error"]
+            assert connection.messages[-1] == {"type": "response.create"}
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+
+    asyncio.run(scenario())
 
 
 def test_capture_image_is_reused_by_shopping_tool_and_failure_clears_it():
