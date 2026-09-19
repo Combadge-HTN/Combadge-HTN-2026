@@ -85,6 +85,38 @@ commbadge voice --screenshots
 
 This uses `cosmic-screenshot` through the desktop screenshot portal. Allow its screen-capture permission prompt if shown. Each requested screenshot is sent to OpenAI for analysis. Capture is opt-in for the session; it is not continuous recording. Capture failures are returned to the assistant, and capture helpers time out after 30 seconds. `--screenshots` and `--snapshot-command` are mutually exclusive and require a voice session rather than `--check`.
 
+## Shopping with Shopify
+
+Enable product discovery and checkout handoff with `--shopify`:
+
+```sh
+commbadge voice --shopify --snapshot-command '/path/to/camera-helper --output-dir {directory}'
+```
+
+Say **“Find something like this on Shopify under fifty dollars.”** The badge captures the requested view, searches Shopify's Global Catalog using the image and your preferences, and compares relevant offers. Follow up with **“Is the first one available in blue?”** or **“Find a cheaper one.”** The most recent image is reused until you request a new capture. A shopping image is sent to both OpenAI and Shopify.
+
+On a COSMIC desktop, screen capture and browser checkout can be enabled together:
+
+```sh
+commbadge voice --shopify --screenshots --open-checkout
+```
+
+After selecting an offer, say **“Open checkout for that one.”** The app refreshes that variant's price and availability, then opens its merchant checkout when `--open-checkout` is enabled. Otherwise it prints and returns the checkout link. Changed offers require a new confirmation. Payment happens at the merchant; the badge does not place orders or process payment. On QNX, deliver the returned link to a companion device; a companion link transport is not included.
+
+Search defaults to products shipping to Canada with CAD prices. `SHOPIFY_COUNTRY` supports `CA` or `US`; `SHOPIFY_CURRENCY` supports `CAD` or `USD`. Prices exclude shipping and tax. Results are candidates, not proof of an exact match or the lowest price across all stores. Catalog availability and final checkout totals can change.
+
+You can also use a supplied photo or search by description:
+
+```sh
+commbadge voice --shopify --image /path/to/product.jpg --question 'Find a similar item under CAD 50'
+commbadge shop 'blue insulated bottle' --max-price 5000
+commbadge shop 'a bottle like this' --image /path/to/product.jpg
+```
+
+`shop` outputs JSON; its price limit is in cents. It does not require an OpenAI key. Shopify discovery uses a public UCP capability profile and does not require a merchant Admin API token. The default profile is an immutable copy of `docs/ucp-agent.json` served as JSON from the project's public repository through jsDelivr. Override `SHOPIFY_AGENT_PROFILE_URL` to host your own profile at an HTTPS URL serving `application/json`; GitHub raw's `text/plain` response is rejected by the catalog. Shopping tools are opt-in and cannot be combined with the voice `--check` flag.
+
+API references: [Shopify Global Catalog](https://shopify.dev/docs/agents/catalog/global-catalog), [agent profiles](https://shopify.dev/docs/agents/get-started/profile), and [checkout handoff](https://shopify.dev/docs/agents/carts-and-checkout).
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -96,7 +128,7 @@ This uses `cosmic-screenshot` through the desktop screenshot portal. Allow its s
 | `BROWSERBASE_API_KEY` | Unset | Reserved for browser integration |
 | `BROWSERBASE_PROJECT_ID` | Unset | Reserved for browser integration |
 
-The client uses the GPT-Live WebSocket protocol with Responses delegation. Enabling capture registers the `capture_snapshot` tool; browser and commerce actions are not implemented yet. Voice sessions and delegated inference incur separate charges.
+The client uses the GPT-Live WebSocket protocol with Responses delegation. Enabling capture registers `capture_snapshot`; `--shopify` adds catalog search, product details, and merchant checkout handoff. General browser automation and merchant inventory actions are not implemented. Voice sessions and delegated inference incur separate charges.
 
 ## Documentation
 

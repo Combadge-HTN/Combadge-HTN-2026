@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import json
 import math
 import platform
 import shlex
@@ -12,6 +13,7 @@ from pathlib import Path
 
 from commbadge.capture import COSMIC_SCREENSHOT, SnapshotCapture
 from commbadge.config import load_settings
+from commbadge.shopify import CatalogClient, ShoppingSession
 from commbadge.vision import DEFAULT_QUESTION, ImageInput
 
 
@@ -57,11 +59,31 @@ def main(argv: list[str] | None = None) -> int:
     snapshots.add_argument(
         "--snapshot-command", help="image capture helper with {directory} placeholder (no shell)"
     )
+    voice.add_argument(
+        "--shopify", action="store_true", help="enable Shopify product search and checkout links"
+    )
+    voice.add_argument(
+        "--open-checkout",
+        action="store_true",
+        help="open requested Shopify checkout links in this device's browser",
+    )
+    shop = commands.add_parser(
+        "shop", help="search Shopify products by description and optional image"
+    )
+    shop.add_argument("query", help="product description and preferences")
+    shop.add_argument("--image", type=Path, help="JPEG, PNG, or WebP for visual product search")
+    shop.add_argument("--env-file", type=Path, default=Path(".env"))
+    shop.add_argument("--max-price", type=int, help="maximum item price in cents (CAD by default)")
     args = parser.parse_args(argv)
 
     image = None
     snapshot_capture = None
+    shopping = None
     if args.command == "voice":
+        if args.open_checkout and not args.shopify:
+            parser.error("--open-checkout requires --shopify")
+        if args.shopify and (args.check or args.list_devices):
+            parser.error("--shopify requires a voice session, not --check or --list-devices")
         if args.screenshots or args.snapshot_command:
             if args.check or args.list_devices:
                 parser.error(
@@ -108,6 +130,30 @@ def main(argv: list[str] | None = None) -> int:
     except OSError:
         parser.exit(1, "Could not read the selected environment file. Check its permissions.\n")
 
+    if args.command == "shop" or (args.command == "voice" and args.shopify):
+        try:
+            shopping = ShoppingSession(
+                CatalogClient(
+                    settings.shopify_agent_profile_url,
+                    country=settings.shopify_country,
+                    currency=settings.shopify_currency,
+                ),
+                open_checkout=args.command == "voice" and args.open_checkout,
+                report=(lambda text: print(text, end="", flush=True))
+                if args.command == "voice"
+                else (lambda _: None),
+            )
+            if args.command == "shop":
+                if args.image:
+                    shopping.image = ImageInput.from_file(args.image, args.query)
+                result = asyncio.run(
+                    shopping.search(args.query, args.image is not None, args.max_price)
+                )
+                print(json.dumps(result, indent=2, ensure_ascii=False))
+                return 0
+        except (OSError, ValueError, RuntimeError) as error:
+            parser.exit(1, f"Shopify failed: {error}\n")
+
     if args.command == "voice":
         if not settings.openai_api_key:
             parser.exit(
@@ -130,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
                     else None,
                     image=image,
                     snapshot_capture=snapshot_capture,
+                    shopping=shopping,
                     playback_command=shlex.split(args.playback_command)
                     if args.playback_command
                     else None,
