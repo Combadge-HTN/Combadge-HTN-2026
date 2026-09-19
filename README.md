@@ -8,7 +8,7 @@ A wearable voice assistant named **Computer** for Raspberry Pi 5 running QNX 8.0
 - Network access to OpenAI and an `OPENAI_API_KEY`.
 - QNX audio drivers and capture/playback helpers implementing the [PCM interface](docs/QNX.md#audio-interface).
 
-The voice client and command transport are implemented. Native QNX audio helpers are still required; end-to-end operation on the Pi has not been validated.
+The voice client, camera capture, and network integrations run on QNX. Native capture/playback helpers and physical microphone/speaker acceptance are still required for a complete wearable voice loop.
 
 ## Setup
 
@@ -24,7 +24,7 @@ python -m pip install --no-deps -e .
 
 Create `.env` using [.env.example](.env.example) and set `OPENAI_API_KEY`. Environment variables override `.env` values. Credentials belong outside source control.
 
-Runtime dependencies are pinned in `requirements-voice.txt`, exported from `uv.lock`. QNX networking and dependency execution require target validation; see [QNX integration](docs/QNX.md).
+Runtime dependencies are pinned in `requirements-voice.txt`, exported from `uv.lock`. QNX networking and dependency execution have been exercised on the target; see [QNX integration](docs/QNX.md) for remaining hardware requirements.
 
 ## Voice
 
@@ -41,6 +41,10 @@ These paths are placeholders for the required helpers, which are not included in
 Press **Ctrl+C** to end the session. Sessions default to five minutes; use `--max-seconds 60` to change the limit. Add `--no-captions` to hide transcripts. The client saves no audio or transcript files. Acoustic echo cancellation must be handled by the audio path.
 
 `commbadge doctor` reports configuration and audio utility availability. `commbadge voice --check` verifies API access and generated audio without opening audio devices; it consumes API credits.
+
+## Speaker identification (prototype)
+
+Add `--speaker Edmon=/path/to/edmon.wav --speaker Samuel=/path/to/samuel.wav` to identify enrolled voices alongside the live conversation. This uses the existing voice installation. Labels arrive asynchronously and can be wrong; overlapping speech remains experimental. See [speaker setup and limitations](docs/SPEAKERS.md).
 
 ## Image questions
 
@@ -72,7 +76,18 @@ The camera integration boundary is `ImageInput.from_bytes(encoded_image, questio
 
 Enable a capture helper, then say **“Hey, look at this”** or **“Take another picture and tell me what you see.”** The agent requests a fresh snapshot, the application captures it, and the vision backend returns findings to the spoken conversation. Follow-up questions can use the last image.
 
-For a device camera, add this option to the voice command:
+For the QNX Pi camera, build the helper once and enable camera capture:
+
+```sh
+make -C native/qnx-camera
+commbadge voice --camera --audio-backend commands \
+  --capture-command '/path/to/capture-helper' \
+  --playback-command '/path/to/playback-helper'
+```
+
+Say **“Computer, look at this”**. The backend captures a fresh physical camera photo and analyzes it. `--camera` selects unit 4; use `--camera-unit N` to select another unit. It finds the built helper independently of the current directory, or uses `combadge-camera` from `PATH`. Camera and desktop screenshot modes are mutually exclusive. Capture still happens only on request.
+
+For a different device camera, add this option to the voice command:
 
 ```sh
 --snapshot-command '/path/to/camera-helper --output-dir {directory}'
@@ -141,7 +156,7 @@ For screen capture, use `commbadge voice --shopify --shop-account --screenshots`
 
 Credentials are stored in `~/.local/state/commbadge/shop-auth.json`, with owner-only file permissions, outside the repository. This is a plaintext credential file, not a keychain. Tokens are refreshed when needed. Use `--auth-file PATH` on `shop-account` and `--shop-auth-file PATH` on `voice` to choose another private location. `commbadge shop-account logout` deletes local credentials; revoke the agent in Shop to remove its account access. Credentials, addresses and payment details are never sent to the voice model. The merchant receives a scoped token and the buyer's public network address (resolved through ipify) for checkout authentication and risk checks.
 
-The account adapter uses Python's standard library and needs no Node.js runtime. Target networking and TLS still require QNX verification. This integration uses Shopify's personal-agent flow for an individual's connected account; broader product distribution requires confirming Shopify's applicable terms and access requirements.
+The account adapter uses Python's standard library and needs no Node.js runtime. Target networking and TLS have been verified on QNX. This integration uses Shopify's personal-agent flow for an individual's connected account; broader product distribution requires confirming Shopify's applicable terms and access requirements.
 
 ### Checkout diagnostics
 

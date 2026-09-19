@@ -461,3 +461,16 @@ def test_image_check_cannot_pass_on_early_speech_or_backend_text_alone(complete)
         assert connection.closed
 
     asyncio.run(scenario())
+
+
+def test_camera_context_and_tool_describe_physical_camera():
+    for shopping in (False, True):
+        config = session_config(
+            Settings(), snapshots=True, capture_source="camera", shopping=shopping
+        )
+        assert "badge's physical camera" in config["instructions"]
+        backend = config["delegation"]["responses"]
+        assert "physical camera" in backend["instructions"]
+        tool = next(t for t in backend["tools"] if t["name"] == "capture_snapshot")
+        assert "badge's physical camera" in tool["description"]
+        assert "screen or camera" not in tool["description"]

@@ -71,3 +71,38 @@ def test_timeout_or_cancellation_stops_helper_and_cleans_directory(tmp_path, can
     assert not Path(directory).exists()
     with pytest.raises(ProcessLookupError):
         os.kill(int(pid), 0)
+
+
+def test_qnx_camera_uses_installed_helper_and_physical_unit(monkeypatch):
+    from commbadge.capture import qnx_camera_capture
+
+    monkeypatch.setattr("commbadge.capture.platform.system", lambda: "QNX")
+    monkeypatch.setattr("commbadge.capture.shutil.which", lambda _: "/opt/bin/combadge-camera")
+    capture = qnx_camera_capture()
+    assert capture.source == "camera"
+    assert capture.command == [
+        "/opt/bin/combadge-camera",
+        "--unit",
+        "4",
+        "--output-dir",
+        "{directory}",
+    ]
+    assert qnx_camera_capture(5).command[2] == "5"
+
+
+def test_qnx_camera_does_not_fall_back_to_desktop_screenshot(monkeypatch):
+    from commbadge.capture import qnx_camera_capture
+
+    monkeypatch.setattr("commbadge.capture.platform.system", lambda: "Linux")
+    with pytest.raises(ValueError, match="QNX"):
+        qnx_camera_capture()
+
+
+def test_qnx_camera_missing_build_has_actionable_error(monkeypatch):
+    from commbadge.capture import qnx_camera_capture
+
+    monkeypatch.setattr("commbadge.capture.platform.system", lambda: "QNX")
+    monkeypatch.setattr("commbadge.capture.shutil.which", lambda _: None)
+    monkeypatch.setattr("commbadge.capture.Path.is_file", lambda _: False)
+    with pytest.raises(ValueError, match="make -C native/qnx-camera"):
+        qnx_camera_capture()
