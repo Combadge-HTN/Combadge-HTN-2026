@@ -149,8 +149,9 @@ def test_slow_worker_has_one_latest_job_and_stale_result_is_discarded():
                 source.feed(pcm(0.5))
             assert len(source.buffer) == source.window_bytes
             assert source.latest[1] == source.total
-            # End utterance before completion: both queued and in-flight jobs are invalid.
+            # A new utterance invalidates both queued and in-flight jobs.
             source.feed(pcm(0.5, 0))
+            source.feed(pcm(0.02))
             release.set()
             await settle()
             connection.send.assert_not_awaited()
@@ -225,6 +226,25 @@ def test_new_turn_clears_identity_even_while_worker_is_blocked():
             await settle()
             assert not release.is_set()
             assert "cannot identify" in connection.send.call_args.args[0]["content"]
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_short_question_gets_final_window_and_ending_silence_does_not_discard_it():
+    async def scenario():
+        source, _ = pipeline()
+        connection = type("Connection", (), {"send": AsyncMock()})()
+        task = asyncio.create_task(source.run(connection, lambda _: None))
+        try:
+            source.feed(pcm(0.8))
+            assert source.latest is None
+            source.feed(pcm(0.4, 0))
+            assert not source.speaking
+            await settle()
+            assert "Edmon" in connection.send.call_args.args[0]["content"]
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)

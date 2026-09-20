@@ -182,7 +182,7 @@ class LocalSpeakerInput:
         self.pending = asyncio.Event()
         self.latest = None
         self.buffer = bytearray()
-        self.total = self.silence = self.since_analysis = 0
+        self.total = self.silence = self.since_analysis = self.voiced_bytes = 0
         self.generation = 0
         self.speaking = False
         self.changed = asyncio.Event()
@@ -213,10 +213,12 @@ class LocalSpeakerInput:
                 self.generation += 1
                 self.buffer.clear()
                 self.since_analysis = 0
+                self.voiced_bytes = 0
                 self.update = (self.generation, None)
                 self.changed.set()
             self.speaking = True
             self.silence = 0
+            self.voiced_bytes += len(pcm)
         else:
             self.silence += len(pcm)
         if self.speaking:
@@ -233,10 +235,12 @@ class LocalSpeakerInput:
                 self.pending.set()
             if self.silence >= int(0.4 * RATE) * 2:
                 self.speaking = False
-                self.latest = None
+                if self.voiced_bytes >= int(0.5 * RATE) * 2:
+                    # A short question still gets a final estimate. Silence does not
+                    # invalidate its identity; the next speech onset does.
+                    self.latest = (self.generation, self.total, bytes(self.buffer))
+                    self.pending.set()
                 self.buffer.clear()
-                # In-flight results from a finished utterance are stale.
-                self.generation += 1
 
     def frame(self, size):
         if size != len(self.passthrough):
@@ -276,6 +280,8 @@ class LocalSpeakerInput:
             if job is None:
                 continue
             generation, end, pcm = job
+            if generation != self.generation or self.total - end > self.hop_bytes * 2:
+                continue
             vector = await self.worker.embed(pcm)
             if generation != self.generation or self.total - end > self.hop_bytes * 2:
                 continue  # Do not publish a stale name after a speaker/turn change.

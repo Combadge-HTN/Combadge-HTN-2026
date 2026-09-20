@@ -6,7 +6,9 @@ pipes. Audio and voice embeddings stay on the device for speaker matching.
 GPT Live still receives microphone audio for the conversation.
 
 This is **windowed identification**, not full diarization. It compares 1.5 seconds
-of recent audio with enrolled references, at most once every 0.5 seconds. A match
+of recent audio with enrolled references, at most once every 0.5 seconds during
+continuous speech. After 0.4 seconds of quiet, a shorter final window is also
+analyzed if at least 0.5 seconds of audible input was collected. A match
 requires both a minimum cosine similarity and a margin over the next candidate.
 Silence is screened with an energy gate. This does not separate simultaneous
 speakers, and background noise can affect both detection and matching.
