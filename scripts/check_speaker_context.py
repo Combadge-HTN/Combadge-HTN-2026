@@ -24,6 +24,7 @@ CASES = {
     "named": ["Edmon"],
     "samuel": ["Samuel"],
     "unknown": ["unknown"],
+    "unavailable": [],
     "multiple": ["Edmon", "Samuel"],
     "overlap": ["Edmon", "ambiguous"],
     "named_then_unknown": ["unknown"],
@@ -51,11 +52,11 @@ def question_audio(settings, question):
 
 
 class SyntheticAudio:
-    def __init__(self, question):
+    def __init__(self, question, delay):
         # A tiny DC value allows the scripted matcher to exercise real feed/window
-        # scheduling without inventing audible speech. The question starts later
-        # so initial context has time to arrive through the Live timeline.
-        self.pcm = b"\x01\x00" * (BYTES_PER_SECOND // 2 * 14) + question
+        # scheduling without inventing audible speech. Start the question before
+        # the first background window to exercise the first-turn race.
+        self.pcm = b"\x01\x00" * (int(BYTES_PER_SECOND // 2 * delay)) + question
         self.offset = 0
 
     async def start(self):
@@ -76,29 +77,44 @@ class SyntheticAudio:
         pass
 
 
-async def check(settings, question, name, labels):
+async def check(settings, question, name, labels, delay, recognition_delay):
     requests = 0
 
     async def analyze(pcm):
         nonlocal requests
         current = ["Edmon"] if name == "named_then_unknown" and requests == 0 else labels
         requests += 1
-        width = 6 / len(current)
+        await asyncio.sleep(recognition_delay)
+        if name == "unavailable":
+            raise RuntimeError("Scripted recognition failure")
+        width = len(pcm) / BYTES_PER_SECOND / len(current)
         return [Segment(i * width, (i + 1) * width, label) for i, label in enumerate(current)]
 
     tracker = SpeakerTracker(SimpleNamespace(analyze=analyze))
     answers = []
     heard = []
-    audio = SyntheticAudio(question)
+    audio = SyntheticAudio(question, delay)
+    lookups = []
+    timeline = []
+    started = time.monotonic()
 
     class ObservedConnection(LiveConnection):
+        async def send(self, message):
+            item = message.get("item", {})
+            if item.get("type") == "function_call_output":
+                result = json.loads(item["output"])
+                lookups.append(result)
+                timeline.append({"at": round(time.monotonic() - started, 2), "result": result})
+            await super().send(message)
+
         async def recv(self):
             event = await super().recv()
             if (
                 event.type == "session.output_transcript.delta"
-                and audio.offset >= 14 * BYTES_PER_SECOND
+                and audio.offset >= delay * BYTES_PER_SECOND
             ):
                 answers.append(event.delta)
+                timeline.append({"at": round(time.monotonic() - started, 2), "said": event.delta})
             if event.type == "session.input_transcript.delta":
                 heard.append(event.delta)
             return event
@@ -124,6 +140,14 @@ async def check(settings, question, name, labels):
     expected = set() if "ambiguous" in labels else set(labels) - {"unknown"}
     result = {
         "case": name,
+        "lookups": lookups,
+        "names_waited_for_result": not any(
+            "said" in row
+            and any(person.lower() in row["said"].lower() for person in ("Edmon", "Samuel"))
+            and not any("result" in prior for prior in timeline[:i])
+            for i, row in enumerate(timeline)
+        ),
+        "timeline": timeline,
         "scripted_labels": labels,
         "answer": answer,
         "heard": "".join(heard),
@@ -144,6 +168,8 @@ async def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--case", action="append", choices=CASES, help="repeat to select cases")
+    parser.add_argument("--question-delay", type=float, default=1)
+    parser.add_argument("--recognition-delay", type=float, default=3)
     parser.add_argument("--question", default="Computer, what's my name?")
     args = parser.parse_args()
     settings = load_settings(args.env_file)
@@ -151,14 +177,20 @@ async def main():
         parser.error("OPENAI_API_KEY is required")
     question = await asyncio.to_thread(question_audio, settings, args.question)
     results = await asyncio.gather(
-        *(check(settings, question, case, CASES[case]) for case in args.case or CASES),
+        *(
+            check(
+                settings, question, case, CASES[case], args.question_delay, args.recognition_delay
+            )
+            for case in args.case or CASES
+        ),
     )
     return (
         0
         if all(
             r["names_check"]
             and r["question_heard"]
-            and r["context_acknowledged"]
+            and r["lookups"]
+            and r["names_waited_for_result"]
             and r["finalized"]
             for r in results
         )

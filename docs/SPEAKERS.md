@@ -39,7 +39,11 @@ Speaker analysis uses standard-library HTTPS in a background thread, matching th
 
 Microphone audio goes to Live first. A background worker analyzes six-second windows every three seconds, with one request in flight and at most one pending window. When analysis falls behind, the newest pending window replaces the older one. This bounds buffering but can leave some speech unidentified.
 
-Expect the first identity update after six seconds of captured audio **plus API processing time**. Ordinary replies do not wait for it and may begin before identification finishes. This is unsuitable when every reply must know the speaker immediately. Requests have an eight-second total deadline, and results more than eight seconds behind the captured audio or wall clock are discarded. Recognition does not become immediate once enrolled.
+The first background identity update arrives after six seconds of captured audio **plus API processing time**. Ordinary replies do not wait for it and may begin before identification finishes.
+
+Recognition questions such as “Can you recognize me?” use the `identify_speaker` backend tool. It immediately snapshots up to twelve seconds of recent microphone audio, including a first question shorter than six seconds. The backend waits for analysis before continuing, and Live is instructed to wait for that result before answering the identity question. It may acknowledge the request while waiting; there is no prescribed answer wording. The ten-second lookup deadline includes waiting for an in-flight background analysis. Lookup failure or timeout returns `unavailable`, distinct from a completed `unknown` result. Mixed known/unknown speakers or multiple names return `ambiguous`. This adds recognition and delegation latency to identity questions, not every conversation turn. Model delegation still requires live acceptance testing; this is not a hard generation gate for all replies.
+
+Background requests have an eight-second total deadline, and results more than eight seconds behind the captured audio or wall clock are discarded. Recognition does not become immediate once enrolled.
 
 Each result describes individual speech intervals, so two people speaking consecutively within a single turn can receive different labels. Names appear as separate timestamped estimates in the console; existing transcript captions are not rewritten. `--no-captions` hides both transcripts and speaker estimates while retaining failure notices.
 
@@ -61,7 +65,7 @@ Names are conversational hints, not authentication. Do not use this prototype to
 
 ## Data and cost
 
-Enabling this feature sends overlapping microphone windows and every enrolled reference clip to OpenAI's transcription endpoint. Reference WAV metadata is stripped. Audio is held in bounded memory; this feature saves no recordings or transcripts. It does not send the transcription text back as trusted instructions—only validated speaker names and intervals. Provider data handling is governed by the account's API settings and policies.
+Enabling this feature sends overlapping microphone windows, requested identity lookups, and every enrolled reference clip to OpenAI's transcription endpoint. Reference WAV metadata is stripped. Audio is held in bounded memory; this feature saves no recordings or transcripts. It does not send the transcription text back as trusted instructions—only validated speaker names and intervals. Provider data handling is governed by the account's API settings and policies.
 
 Diarization adds paid requests alongside Live. Overlapping windows and repeated reference uploads increase usage. All-zero digital silence is skipped; ordinary microphone noise may still trigger requests. The normal voice session duration limit also bounds this feature's run time.
 
@@ -82,6 +86,8 @@ To check the model handoff separately from recognition, run:
 ```sh
 python scripts/check_speaker_context.py --env-file .env
 ```
+
+The question starts after one second by default, before the first background result, with a scripted three-second analysis delay. Use `--question-delay` and `--recognition-delay` to change those timings. It logs tool results and spoken output timestamps so premature identity answers are visible.
 
 This opt-in check uses paid TTS and Live API requests with generated speech and scripted matcher results. It opens no audio devices and uses no personal recordings. It checks two enrolled names, unknown speech, multiple speakers, overlap, and a named-then-unknown transition. Use `--case overlap`, for example, to rerun one case. Review the printed answers for appropriate uncertainty; automated name-presence checks alone do not establish semantic correctness or recognition accuracy.
 

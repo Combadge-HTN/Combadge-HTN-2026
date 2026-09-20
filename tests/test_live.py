@@ -671,3 +671,15 @@ def test_composio_only_session_executes_tools_without_blocking_voice_audio():
         assert any(m["type"] == "response.create" for m in connection.messages)
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "apps", [{}, {"snapshots": True}, {"shopping": True}, {"call_names": ["Edmon"]}]
+)
+def test_speaker_lookup_tool_composes_with_other_features(apps):
+    config = session_config(Settings(), speakers=True, **apps)
+    backend = config["delegation"]["responses"]
+    names = [tool["name"] for tool in backend["tools"]]
+    assert names.count("identify_speaker") == 1
+    assert backend["parallel_tool_calls"] is False
+    assert "wait for its result" in config["instructions"]

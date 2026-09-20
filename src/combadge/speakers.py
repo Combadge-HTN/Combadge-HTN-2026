@@ -17,6 +17,33 @@ from combadge.audio import RATE
 REQUEST_TIMEOUT = 8
 BYTES_PER_SECOND = RATE * 2
 MAX_WAV_BYTES = BYTES_PER_SECOND * 30 + 4096
+LOOKUP_SECONDS = 12
+LOOKUP_TIMEOUT = 10
+SPEAKER_TOOL = {
+    "type": "function",
+    "name": "identify_speaker",
+    "description": (
+        "Identify the speaker from recently captured microphone audio. Call for a user asking "
+        "whether you recognize them, their name, or who is speaking. Wait for the result; "
+        "background labels may not yet cover the question. No recording or name arguments needed."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+LOOKUP_INSTRUCTIONS = (
+    " When the user asks whether you recognize them, their name, or who is speaking, "
+    "delegate to the backend for identify_speaker and wait for its result before answering "
+    "the identity question. You may acknowledge naturally while waiting. "
+    "A pending lookup is not an unknown result: do not say you cannot recognize the user "
+    "before the lookup returns. Do not substitute a delayed background label for this lookup. "
+    "Use a matched name as conversational context; ambiguous, unknown, or unavailable results "
+    "do not establish a name. No particular reply wording is required."
+)
 INSTRUCTIONS = (
     " This badge has an external enrolled-speaker matcher. It compares microphone speech "
     "with user-provided voice references and supplies named matches as silent context. "
@@ -266,6 +293,8 @@ class SpeakerTracker:
         self.clock = clock
         self.pending: asyncio.Queue[Window] = asyncio.Queue(maxsize=1)
         self.buffer = bytearray()
+        self.recent = bytearray()
+        self.analysis_lock = asyncio.Lock()
         self.offset = 0
         self.total_bytes = 0
         self.published_until = 0.0
@@ -283,6 +312,8 @@ class SpeakerTracker:
         if self.disabled:
             return
         self.total_bytes += len(pcm)
+        self.recent.extend(pcm)
+        del self.recent[: max(0, len(self.recent) - LOOKUP_SECONDS * BYTES_PER_SECOND)]
         self.buffer.extend(pcm)
         while len(self.buffer) >= 6 * BYTES_PER_SECOND:
             data = bytes(self.buffer[: 6 * BYTES_PER_SECOND])
@@ -294,6 +325,40 @@ class SpeakerTracker:
                     self.pending.get_nowait()
                     self.dropped += 1
                 self.pending.put_nowait(window)
+
+    async def identify(self) -> dict:
+        """Resolve a question's captured audio without waiting for a full background window."""
+        if self.disabled:
+            return {"status": "unavailable", "reason": "speaker_analysis_disabled"}
+        pcm = bytes(self.recent)
+        end = self.total_bytes / BYTES_PER_SECOND
+        start = end - len(pcm) / BYTES_PER_SECOND
+        if len(pcm) < BYTES_PER_SECOND // 10 or not any(pcm):
+            return {"status": "unavailable", "reason": "insufficient_audio"}
+        self.report("\nSpeaker lookup requested; waiting for recognition…\n")
+        try:
+            async with asyncio.timeout(LOOKUP_TIMEOUT):
+                async with self.analysis_lock:
+                    segments = await self.transcriber.analyze(pcm)
+        except TimeoutError:
+            return {"status": "unavailable", "reason": "recognition_timeout"}
+        except Exception:
+            return {"status": "unavailable", "reason": "recognition_failed"}
+        names = sorted({segment.speaker for segment in segments} - {"unknown", "ambiguous"})
+        ambiguous = (
+            len(names) > 1
+            or any(s.speaker == "ambiguous" for s in segments)
+            or bool(names and any(s.speaker == "unknown" for s in segments))
+        )
+        status = "ambiguous" if ambiguous else "matched" if names else "unknown"
+        self.report(f"\nSpeaker lookup completed: {status}.\n")
+        return {
+            "status": status,
+            "name": names[0] if status == "matched" else None,
+            "speakers": names,
+            "audio_start": round(start, 3),
+            "audio_end": round(end, 3),
+        }
 
     def stale(self, window: Window) -> bool:
         return (
@@ -324,7 +389,8 @@ class SpeakerTracker:
                 self.dropped += 1
                 continue
             try:
-                segments = await self.transcriber.analyze(window.pcm)
+                async with self.analysis_lock:
+                    segments = await self.transcriber.analyze(window.pcm)
                 self.failures = 0
                 if self.disabled or self.stale(window):
                     self.dropped += 1

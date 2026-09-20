@@ -314,3 +314,35 @@ def test_stopping_worker_cancels_web_lookup_without_late_output():
         assert connection.messages == []
 
     asyncio.run(scenario())
+
+
+def test_speaker_lookup_waits_for_result_before_backend_continues():
+    async def scenario():
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def identify():
+            entered.set()
+            await release.wait()
+            return {"status": "matched", "name": "Edmon"}
+
+        connection = Connection()
+        delegation = SnapshotDelegation(connection, None, lambda _: None, speaker_handler=identify)
+        delegation.observe(event("response.created", response=NS(id="r1")))
+        delegation.observe(call(name="identify_speaker", arguments="{}"))
+        delegation.observe(event("response.completed", response=NS(id="r1")))
+        worker = asyncio.create_task(delegation.run())
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            assert not connection.messages
+            release.set()
+            await asyncio.wait_for(connection.continued.wait(), 1)
+            assert json.loads(connection.messages[0]["item"]["output"]) == {
+                "status": "matched",
+                "name": "Edmon",
+            }
+            assert connection.messages[1] == {"type": "response.create"}
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+
+    asyncio.run(scenario())

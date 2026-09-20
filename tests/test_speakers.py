@@ -617,3 +617,99 @@ def test_cancelled_analysis_does_not_reuse_results_or_start_parallel_requests(
         assert len(calls) == 2
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "labels,status,name",
+    [
+        (["Edmon"], "matched", "Edmon"),
+        (["unknown"], "unknown", None),
+        ([], "unknown", None),
+        (["Edmon", "Samuel"], "ambiguous", None),
+        (["Edmon", "unknown"], "ambiguous", None),
+        (["ambiguous"], "ambiguous", None),
+    ],
+)
+def test_lookup_analyzes_partial_first_window(labels, status, name):
+    async def scenario():
+        seen = []
+
+        async def analyze(pcm):
+            seen.append(pcm)
+            return [Segment(0, 1, label) for label in labels]
+
+        tracker = SpeakerTracker(NS(analyze=analyze))
+        tracker.feed(PCM)
+        assert tracker.pending.empty()  # No six-second background window yet.
+        result = await tracker.identify()
+        assert seen == [PCM]
+        assert result["status"] == status
+        assert result["name"] == name
+        assert result["audio_start"] == 0 and result["audio_end"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_lookup_pins_bounded_question_audio_while_capture_continues():
+    async def scenario():
+        entered, release = asyncio.Event(), asyncio.Event()
+        seen = []
+
+        async def analyze(pcm):
+            seen.append(pcm)
+            entered.set()
+            await release.wait()
+            return [Segment(0, 1, "Edmon")]
+
+        tracker = SpeakerTracker(NS(analyze=analyze))
+        tracker.feed(PCM * 15)
+        task = asyncio.create_task(tracker.identify())
+        await entered.wait()
+        tracker.feed(b"\x02\x00" * (BPS // 2 * 20))
+        release.set()
+        result = await task
+        assert seen == [PCM * 12]
+        assert len(tracker.recent) == 12 * BPS
+        assert (result["audio_start"], result["audio_end"]) == (3, 15)
+
+    asyncio.run(scenario())
+
+
+def test_lookup_timeout_includes_wait_for_background_request(monkeypatch):
+    monkeypatch.setattr("combadge.speakers.LOOKUP_TIMEOUT", 0.01)
+
+    async def scenario():
+        async def analyze(pcm):
+            pytest.fail("Must not run concurrently with background request")
+
+        tracker = SpeakerTracker(NS(analyze=analyze))
+        tracker.feed(PCM)
+        async with tracker.analysis_lock:
+            assert await tracker.identify() == {
+                "status": "unavailable",
+                "reason": "recognition_timeout",
+            }
+
+    asyncio.run(scenario())
+
+
+def test_lookup_errors_are_unavailable_and_cancellation_propagates():
+    async def scenario():
+        async def fail(pcm):
+            raise RuntimeError("private server details")
+
+        tracker = SpeakerTracker(NS(analyze=fail))
+        assert (await tracker.identify())["reason"] == "insufficient_audio"
+        tracker.feed(PCM)
+        assert await tracker.identify() == {"status": "unavailable", "reason": "recognition_failed"}
+
+        async def cancel(pcm):
+            raise asyncio.CancelledError
+
+        tracker.transcriber.analyze = cancel
+        with pytest.raises(asyncio.CancelledError):
+            await tracker.identify()
+        tracker.disabled = True
+        assert (await tracker.identify())["reason"] == "speaker_analysis_disabled"
+
+    asyncio.run(scenario())
