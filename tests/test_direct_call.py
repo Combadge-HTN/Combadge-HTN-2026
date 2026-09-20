@@ -239,8 +239,9 @@ def test_managed_capture_starts_only_after_answer_and_always_hangs_up(monkeypatc
         else:
             answer_ready.set()
             if outcome == "capture-fails":
-                with pytest.raises(RuntimeError, match="Capture unavailable"):
-                    await task
+                result = await task
+                assert result["status"] == "failed"
+                assert result["error"]
             else:
                 await task
         assert audio.starts == (1 if outcome in ("answered", "capture-fails") else 0)

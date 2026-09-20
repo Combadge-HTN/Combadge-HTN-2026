@@ -101,8 +101,9 @@ def test_real_audio_helpers_remain_closed_while_ringing(tmp_path, monkeypatch, o
             else:
                 answer.set()
             if outcome.endswith("fails"):
-                with pytest.raises(RuntimeError, match="Microphone stopped|Speaker stopped"):
-                    await asyncio.wait_for(task, 3)
+                result = await asyncio.wait_for(task, 3)
+                assert result["status"] == "failed"
+                assert result["error"]
             else:
                 await asyncio.wait_for(task, 3)
             assert call.ended and call.closed
