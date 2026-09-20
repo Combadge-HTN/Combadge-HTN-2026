@@ -68,9 +68,12 @@ of total acoustic ERLE or speech intelligibility. Calibration recordings stay on
 the Pi outside the Git checkout.
 
 The timing fix alone still produced a repeating assistant feedback loop in a live
-speaker test. The combined residual-suppression revision needs a fresh far-end-only
-speech test and conversation test. It is not yet accepted as an effective echo
-solution for the complete setup.
+speaker test. The combined residual-suppression revision also failed an isolated
+fixed-sample test: Speechmatics transcribed "Can you recognize me" from the filtered
+microphone while that sample played through the speaker. No Live session ran in
+that diagnostic, so the result establishes residual audible speech without a
+feedback loop. Do not treat recorded-signal attenuation as conversational acceptance.
+This is not yet an effective echo solution for the complete setup.
 
 If independent clocks defeat this prototype, use a shared-clock USB audio device
 for microphone and speaker, or integrate an echo canceller with delay estimation
