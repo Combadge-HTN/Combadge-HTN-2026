@@ -4,6 +4,53 @@ import sys
 from combadge.audio import FRAME_BYTES, CommandAudio
 
 
+def test_local_cue_plays_without_starting_or_reading_microphone(tmp_path, monkeypatch):
+    from combadge.audio import RATE, play_local_cue
+
+    async def forbidden(*args):
+        raise AssertionError("Local cue must not start or read capture")
+
+    monkeypatch.setattr(CommandAudio, "start", forbidden)
+    monkeypatch.setattr(CommandAudio, "read", forbidden)
+    output = tmp_path / "cue.pcm"
+    cue = b"\x12\x34" * 10944
+    command = [
+        sys.executable, "-c",
+        "import pathlib,sys; pathlib.Path(sys.argv[1]).write_bytes(sys.stdin.buffer.read())",
+        str(output),
+    ]
+    asyncio.run(play_local_cue(command, cue))
+    assert output.read_bytes() == cue + bytes(RATE // 5 * 2)
+
+
+def test_fifo_cue_preserves_samples_with_partial_writes(monkeypatch):
+    import stat
+    from importlib.resources import files
+    from types import SimpleNamespace
+    from combadge.audio import play_fifo_cue
+
+    output = bytearray()
+    closed = []
+
+    def write(fd, data):
+        assert fd == 12345
+        count = min(len(data), 100)
+        output.extend(data[:count])
+        return count
+
+    async def scenario():
+        monkeypatch.setattr("combadge.audio.os.open", lambda *args: 12345)
+        monkeypatch.setattr("combadge.audio.os.fstat", lambda _: SimpleNamespace(st_mode=stat.S_IFIFO))
+        monkeypatch.setattr("combadge.audio.os.write", write)
+        monkeypatch.setattr("combadge.audio.os.close", closed.append)
+        await play_fifo_cue("unused")
+
+    asyncio.run(scenario())
+    cue = files("combadge").joinpath("assets/tng_chirp_stereo.pcm").read_bytes()
+    assert output == cue + bytes(4410 * 4)
+    assert closed == [12345]
+
+
 def test_console_capture_needs_no_playback_process():
     async def scenario():
         audio = CommandAudio(

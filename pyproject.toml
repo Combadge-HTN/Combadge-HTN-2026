@@ -23,6 +23,9 @@ commbadge = "combadge.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+combadge = ["assets/*.pcm", "assets/*.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

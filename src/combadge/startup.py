@@ -82,6 +82,14 @@ def add_arguments(parser):
         default=3600,
         help="session limit (default: one hour)",
     )
+    parser.add_argument("--idle-seconds", type=positive_seconds, default=2.0)
+    parser.add_argument("--touch-bus", type=int, default=1)
+    parser.add_argument("--touch-address", type=lambda value: int(value, 0), default=0x5A)
+    parser.add_argument("--touch-irq", type=int, default=4)
+    parser.add_argument("--touch-electrode", type=int, default=0)
+    parser.add_argument("--double-tap-window", type=positive_seconds, default=0.6)
+    parser.add_argument("--session-light-pin", type=int, default=14)
+    parser.add_argument("--haptic-pin", type=int, default=15)
 
 
 def shopping_arguments(args):
@@ -99,6 +107,28 @@ def shopping_arguments(args):
 
 def speaker_arguments(args):
     return [item for reference in args.speaker for item in ("--speaker", reference)]
+
+
+def touch_arguments(args):
+    return [
+        "--touch-activate",
+        "--idle-seconds",
+        str(args.idle_seconds),
+        "--touch-bus",
+        str(args.touch_bus),
+        "--touch-address",
+        hex(args.touch_address),
+        "--touch-irq",
+        str(args.touch_irq),
+        "--touch-electrode",
+        str(args.touch_electrode),
+        "--double-tap-window",
+        str(args.double_tap_window),
+        "--session-light-pin",
+        str(args.session_light_pin),
+        "--haptic-pin",
+        str(args.haptic_pin),
+    ]
 
 
 def configured_speakers(args):
@@ -164,7 +194,8 @@ def launch(args):
     command.append("--calls" if args.calls else "--no-calls")
     command.extend(shopping_arguments(args))
     command.extend(speaker_arguments(args))
+    command.extend(touch_arguments(args))
     print(
-        "Starting microphone and camera; replies appear in this console. Ctrl+C stops.", flush=True
+        "Starting badge controller; double tap electrode 0 to activate. Ctrl+C stops.", flush=True
     )
     return main(command)

@@ -76,6 +76,12 @@ class SnapshotDelegation:
         self.pending: dict[str, list[FunctionCall]] = {}
         self.seen: set[str] = set()
         self.queue: asyncio.Queue[list[FunctionCall]] = asyncio.Queue(maxsize=8)
+        self.running = False
+
+    @property
+    def busy(self) -> bool:
+        """Whether delegated work is being collected or waiting to run."""
+        return self.running or bool(self.pending) or not self.queue.empty()
 
     def observe(self, envelope) -> None:
         event = envelope.event
@@ -106,6 +112,7 @@ class SnapshotDelegation:
     async def run(self) -> None:
         while True:
             calls = await self.queue.get()
+            self.running = True
             for call in calls:
                 image = None
                 try:
@@ -209,3 +216,4 @@ class SnapshotDelegation:
             await self.connection.send({"type": "response.create"})
             if self.on_tools_submitted is not None:
                 self.on_tools_submitted()
+            self.running = False

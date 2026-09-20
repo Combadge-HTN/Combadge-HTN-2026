@@ -9,14 +9,17 @@ Microphone → QNX capture helper → Python client ⇄ GPT-Live
 Speaker   ← QNX playback helper ← Python client
 ```
 
-Chest activation, haptic feedback, and external action tools are planned. The LilyPad SimpleSnap Protoboard requires a separate controller for firmware-driven controls.
+Chest activation and haptic feedback use the Pi-connected MPR121 and GPIO outputs.
+The long-lived controller waits with cloud audio disconnected, activates on an
+electrode-0 double tap, and exposes session state on GPIO 14. The LilyPad
+SimpleSnap Protoboard still requires a separate controller for firmware-driven controls.
 
 Still images and questions can be submitted to the managed Responses backend through the Live connection. GPT-Live uses the backend findings in its spoken response. Camera capture will supply encoded image bytes through the same interface.
 
 ## Milestones
 
 1. Complete a spoken conversation on the Pi with the available speakers and Dan's Bluetooth/audio drivers; native QNX capture/playback streaming is implemented.
-2. Add chest activation and distinct haptic feedback for listening, completion, and failure.
+2. Add chest activation and distinct haptic feedback for listening, completion, and failure. **Implemented.**
 3. Add a Browserbase workflow that executes a task and returns its result by voice.
 4. Add Shopify product matching, clarification of ambiguous requests, and draft orders.
 5. Add on-device inference using a QNX-compatible AI module for a defined offline feature.

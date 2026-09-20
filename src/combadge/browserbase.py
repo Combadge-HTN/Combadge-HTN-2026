@@ -311,3 +311,5 @@ class BrowserbaseClient:
     async def close(self) -> None:
         if self._browser is not None:
             await self._browser.close()
+            self._browser = None
+        self.requests = 0

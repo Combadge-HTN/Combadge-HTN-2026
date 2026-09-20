@@ -70,6 +70,25 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="limit for this assistant session (default: 300; check: 15/45)",
     )
+    voice.add_argument("--touch-activate", action="store_true", help=argparse.SUPPRESS)
+    voice.add_argument(
+        "--idle-seconds", type=positive_seconds, default=2.0, help=argparse.SUPPRESS
+    )
+    voice.add_argument("--cue-fifo", type=Path, help=argparse.SUPPRESS)
+    voice.add_argument("--touch-bus", type=int, default=1, help=argparse.SUPPRESS)
+    voice.add_argument(
+        "--touch-address",
+        type=lambda value: int(value, 0),
+        default=0x5A,
+        help=argparse.SUPPRESS,
+    )
+    voice.add_argument("--touch-irq", type=int, default=4, help=argparse.SUPPRESS)
+    voice.add_argument("--touch-electrode", type=int, default=0, help=argparse.SUPPRESS)
+    voice.add_argument(
+        "--double-tap-window", type=positive_seconds, default=0.6, help=argparse.SUPPRESS
+    )
+    voice.add_argument("--session-light-pin", type=int, default=14, help=argparse.SUPPRESS)
+    voice.add_argument("--haptic-pin", type=int, default=15, help=argparse.SUPPRESS)
     voice.add_argument(
         "--no-web", action="store_true", help="disable automatic Browserbase online lookups"
     )
@@ -192,6 +211,13 @@ def main(argv: list[str] | None = None) -> int:
     read.add_argument("--contact", help="filter by contact name or E.164 sender")
     read.add_argument("--limit", type=int, choices=range(1, 11), default=5, metavar="1..10")
     args = parser.parse_args(argv)
+    if args.command == "voice" and args.touch_activate:
+        if args.touch_address not in range(0x5A, 0x5E):
+            parser.error("--touch-address must be 0x5A through 0x5D")
+        if args.touch_electrode not in range(12):
+            parser.error("--touch-electrode must be 0 through 11")
+        if min(args.touch_bus, args.touch_irq, args.session_light_pin, args.haptic_pin) < 0:
+            parser.error("touch bus and GPIO numbers must be nonnegative")
     if args.command == "start":
         from combadge.startup import launch
 
@@ -549,33 +575,102 @@ def main(argv: list[str] | None = None) -> int:
                 else "Web access: disabled (--no-web/--check or BROWSERBASE_API_KEY not set)."
             )
             print("Connecting to GPT-Live. This uses paid API credits; Ctrl+C ends the session.")
-            asyncio.run(
-                connect_voice(
-                    settings,
-                    check=args.check,
-                    backend=args.audio_backend,
-                    input_device=args.input_device,
-                    output_device=args.output_device,
-                    seconds=args.max_seconds or ((45 if image else 15) if args.check else 300),
-                    captions=not args.no_captions,
-                    console=args.audio_backend == "console",
-                    capture_command=shlex.split(args.capture_command)
-                    if args.capture_command
-                    else None,
-                    image=image,
-                    snapshot_capture=snapshot_capture,
-                    phone_settings=phone_settings,
-                    shopping=shopping,
-                    speaker_tracker=speaker_tracker,
-                    speaker_input=speaker_input,
-                    web=web,
-                    composio=composio,
-                    sms=sms,
-                    playback_command=shlex.split(args.playback_command)
-                    if args.playback_command
-                    else None,
-                )
+            voice_options = dict(
+                settings=settings,
+                check=args.check,
+                backend=args.audio_backend,
+                input_device=args.input_device,
+                output_device=args.output_device,
+                seconds=args.max_seconds or ((45 if image else 15) if args.check else 300),
+                captions=not args.no_captions,
+                console=args.audio_backend == "console",
+                capture_command=shlex.split(args.capture_command)
+                if args.capture_command
+                else None,
+                image=image,
+                snapshot_capture=snapshot_capture,
+                phone_settings=phone_settings,
+                shopping=shopping,
+                speaker_tracker=speaker_tracker,
+                speaker_input=speaker_input,
+                web=web,
+                composio=composio,
+                sms=sms,
+                playback_command=shlex.split(args.playback_command)
+                if args.playback_command
+                else None,
             )
+            if args.touch_activate:
+                from combadge.device import BadgeHardware, run_badge
+
+                hardware = BadgeHardware(
+                    bus=args.touch_bus,
+                    address=args.touch_address,
+                    irq_pin=args.touch_irq,
+                    light_pin=args.session_light_pin,
+                    haptic_pin=args.haptic_pin,
+                )
+
+                async def daemon():
+                    def describe_error(error):
+                        message = str(error) or type(error).__name__
+                        for secret in (
+                            settings.openai_api_key, settings.browserbase_api_key,
+                            settings.composio_api_key, settings.speechmatics_api_key,
+                            getattr(phone_settings, "token", ""),
+                            getattr(phone_settings, "password", ""),
+                            sms.settings.auth_token if sms else "",
+                        ):
+                            if secret:
+                                message = message.replace(secret, "[REDACTED]")
+                        return message
+
+                    async def play_cue():
+                        from combadge.audio import play_fifo_cue, play_local_cue
+                        from combadge.device import activation_chirp
+
+                        if args.cue_fifo:
+                            await play_fifo_cue(args.cue_fifo)
+                        elif voice_options["playback_command"]:
+                            await play_local_cue(voice_options["playback_command"], activation_chirp())
+
+                    async def session(stop, continuity, context, cue):
+                        if args.cue_fifo or voice_options["playback_command"]:
+                            await play_cue()
+                            cue = None  # Already played; do not queue it again in GPT-Live.
+                            if stop.is_set():
+                                return
+                        if speaker_tracker is not None:
+                            speaker_tracker.reset_session()
+                        return await connect_voice(
+                            **voice_options,
+                            stop=stop,
+                            continuity=continuity,
+                            resume_context=context,
+                            greet=False,
+                            idle_seconds=args.idle_seconds,
+                            activation_cue=cue,
+                            manage_signals=False,
+                        )
+
+                    try:
+                        return await run_badge(
+                            session,
+                            hardware=hardware,
+                            electrode=args.touch_electrode,
+                            double_tap_window=args.double_tap_window,
+                            report=lambda text: print(text, flush=True),
+                            describe_error=describe_error,
+                            end_cue=play_cue,
+                        )
+                    finally:
+                        if speaker_input is not None:
+                            await speaker_input.close()
+                        if web is not None and callable(getattr(web, "close", None)):
+                            await web.close()
+
+                return asyncio.run(daemon())
+            asyncio.run(connect_voice(**voice_options))
             return 0
         except ImportError:
             parser.exit(1, "Voice dependencies are missing. Run: pip install -e '.[voice]'\n")

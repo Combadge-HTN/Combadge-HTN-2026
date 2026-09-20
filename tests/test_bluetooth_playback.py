@@ -49,3 +49,30 @@ def test_streaming_adapter_preserves_speech_dynamic_range(monkeypatch):
     monkeypatch.setattr(namespace["sys"], "stdin", stdin)
     output = b"".join(namespace["converted_input"]())
     assert output == struct.pack("<hh", 20000, 20000) * 441
+
+
+def test_lead_in_preserves_speech_and_only_primes_after_silence():
+    prime = runpy.run_path(
+        str(Path(__file__).resolve().parents[1] / "scripts/bluetooth_playback.py")
+    )["speech_lead_in"]
+    speech = struct.pack("<h", 20000) * 480
+    silence = bytes(24000)
+    output = list(prime([speech, speech, silence, speech], clock=lambda: 0))
+    cue = output[:9]
+    assert len(b"".join(cue)) == 8640
+    assert any(b"".join(cue))
+    assert output[9:12] == [speech, speech, silence]
+    assert output[12:21] == cue
+    assert output[21:] == [speech]
+    assert list(prime([silence], clock=lambda: 0)) == [silence]
+
+
+def test_lead_in_rearms_after_wall_clock_gap():
+    prime = runpy.run_path(
+        str(Path(__file__).resolve().parents[1] / "scripts/bluetooth_playback.py")
+    )["speech_lead_in"]
+    times = iter([0, 0, 0.2, 1, 1.2])
+    speech = b"\x01\x00" * 480
+    output = list(prime([speech, speech], clock=lambda: next(times)))
+    assert len(output) == 20
+    assert output[9] == output[19] == speech

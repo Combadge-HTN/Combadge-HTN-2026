@@ -307,6 +307,22 @@ class SpeakerTracker:
         self.awaiting: dict[str, float] = {}
         self.report = lambda _: None
 
+    def reset_session(self) -> None:
+        """Discard timing and queued audio from the previous Live session."""
+        self.pending = asyncio.Queue(maxsize=1)
+        self.buffer.clear()
+        self.recent.clear()
+        self.offset = 0
+        self.total_bytes = 0
+        self.published_until = 0.0
+        self.disabled = False
+        self.failures = 0
+        self.dropped = 0
+        self.published = 0
+        self.acknowledged = 0
+        self.sequence = 0
+        self.awaiting.clear()
+
     def feed(self, pcm: bytes) -> None:
         # Called only after the same PCM was successfully sent to GPT-Live.
         if self.disabled:

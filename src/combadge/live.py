@@ -55,8 +55,14 @@ from combadge.vision import ImageInput
 Report = Callable[[str], None]
 LIVE_URL = "wss://api.openai.com/v1/live/sessions"
 PROMPT = (
-    "Your name is Computer. You are the AI in a wearable communicator badge. "
-    "Respond when the user addresses you as Computer. Speak in natural English. "
+    "Your designation is Computer. You are the AI in a wearable communicator badge. "
+    "Use terse, precise, impersonal, emotionally neutral language. Avoid greetings, small talk, "
+    "jokes, emotional mirroring, filler, and unnecessary first-person phrasing. Acknowledge work "
+    "briefly with phrases such as 'Working.' Report successful results directly. When a request "
+    "cannot be completed, say 'Unable to comply' and state the concrete cause or correction. "
+    "Ask a concise clarification question when ambiguity would make an action unsafe. "
+    "During an activated session, respond to the user's requests without requiring a wake word. "
+    "Speak in natural English. "
     "Keep all spoken replies in English unless the user explicitly requests another language. "
     "Images, product names, or catalog text must not change your spoken language. "
     "Listen to corrections and interruptions. Delegate reasoning questions to the backend. "
@@ -405,6 +411,10 @@ def session_config(
         )
         backend.setdefault("tools", []).append(SPEAKER_TOOL)
         backend["parallel_tool_calls"] = False
+    config["delegation"]["responses"]["instructions"] += (
+        " Use terse, precise, impersonal language. Avoid small talk and emotional mirroring. "
+        "Report verified results directly and explain failures concisely."
+    )
     return config
 
 
@@ -455,6 +465,9 @@ async def run_session(
     sms: SmsClient | None = None,
     continuity: VoiceContinuity | None = None,
     resume_context: str | None = None,
+    greet: bool = True,
+    idle_seconds: float | None = None,
+    activation_cue: bytes | None = None,
 ) -> LiveStats:
     """Run a connected session; injectable audio/connection enable hardware-free tests."""
     if speaker_tracker is not None and speaker_input is not None:
@@ -469,6 +482,7 @@ async def run_session(
     image_response: str | None = None
     image_speech_bytes = 0
     loop = asyncio.get_running_loop()
+    last_activity = loop.time()
     call_names = None
     call_handler = None
     call_requested = asyncio.Event()
@@ -559,10 +573,13 @@ async def run_session(
                 speaker_tracker.feed(data)
 
     async def play_audio() -> None:
+        nonlocal last_activity
         while True:
             data = await playback.get()
             try:
                 await audio.write(data)
+                if any(data):
+                    last_activity = loop.time() + len(data) / (RATE * 2)
             finally:
                 playback.task_done()
 
@@ -572,7 +589,7 @@ async def run_session(
             await asyncio.sleep(0.02)
 
     async def receive() -> None:
-        nonlocal last_speaker, image_delegation, image_response, image_speech_bytes
+        nonlocal last_speaker, image_delegation, image_response, image_speech_bytes, last_activity
         while True:
             event = await connection.recv()
             if speaker_input is not None and speaker_input.observe(event):
@@ -580,6 +597,12 @@ async def run_session(
             if speaker_tracker is not None and speaker_tracker.observe(event):
                 continue
             check_error(event)
+            if event.type in (
+                "session.input_transcript.delta",
+                "session.output_transcript.delta",
+                "response.event",
+            ):
+                last_activity = loop.time()
             if snapshots is not None and event.type == "response.event":
                 snapshots.observe(event)
             if event.type == "session.output_audio.delta":
@@ -592,6 +615,7 @@ async def run_session(
                 handoff_speech.audio(data, loop.time())
                 stats.received_bytes += len(data)
                 if any(data):
+                    last_activity = loop.time()
                     stats.speech_bytes += len(data)
                     if image_started is not None and stats.image_completed:
                         image_speech_bytes += len(data)
@@ -661,6 +685,20 @@ async def run_session(
                 if image_speech_bytes >= FRAME_BYTES * 5:
                     stop.set()
 
+    async def stop_when_idle() -> None:
+        nonlocal last_activity
+        if idle_seconds is None:
+            await asyncio.Future()
+        while True:
+            await asyncio.sleep(min(0.1, idle_seconds))
+            delegated = snapshots is not None and snapshots.busy
+            if delegated or call_requested.is_set():
+                last_activity = loop.time()
+                continue
+            if loop.time() - last_activity >= idle_seconds:
+                stop.set()
+                return
+
     try:
         async with asyncio.timeout(startup_timeout):
             await connection.send(
@@ -700,6 +738,9 @@ async def run_session(
             await speaker_input.start()
             report("Streaming speaker identification ready.\n")
         await audio.start()
+        if activation_cue:
+            for offset in range(0, len(activation_cue), FRAME_BYTES):
+                playback.put_nowait(activation_cue[offset : offset + FRAME_BYTES])
         report(
             "\nGPT-Live connected. "
             + (
@@ -713,7 +754,7 @@ async def run_session(
             image_started = loop.time()
             await connection.send(image.event())
             await connection.send({"type": "response.create", "event_id": "image_response"})
-        else:
+        elif greet:
             # A greeting makes the connection observable; silence streams in check mode.
             await connection.send(
                 {
@@ -728,6 +769,7 @@ async def run_session(
                     ),
                 }
             )
+        last_activity = loop.time()
         tasks = [
             asyncio.create_task(send_audio()),
             asyncio.create_task(receive()),
@@ -735,6 +777,8 @@ async def run_session(
             asyncio.create_task(stop.wait()),
             asyncio.create_task(asyncio.sleep(seconds)),
         ]
+        if idle_seconds is not None:
+            tasks.append(asyncio.create_task(stop_when_idle()))
         if speaker_tracker is not None:
             tasks.append(
                 asyncio.create_task(speaker_tracker.run(connection, report, captions=captions))
@@ -841,6 +885,13 @@ async def connect_voice(
     web: BrowserbaseClient | None = None,
     composio: ComposioClient | None = None,
     sms: SmsClient | None = None,
+    stop: asyncio.Event | None = None,
+    continuity: VoiceContinuity | None = None,
+    resume_context: str | None = None,
+    greet: bool = True,
+    idle_seconds: float | None = None,
+    activation_cue: bytes | None = None,
+    manage_signals: bool = True,
 ) -> LiveStats:
     # Lazy import keeps the base package usable without the voice extra.
     configure_asyncio()
@@ -867,11 +918,12 @@ async def connect_voice(
         return audio
 
     audio = make_audio()
-    stop = asyncio.Event()
+    stop = stop or asyncio.Event()
     stats = LiveStats()
     loop = asyncio.get_running_loop()
-    previous = signal.getsignal(signal.SIGINT)
-    loop.add_signal_handler(signal.SIGINT, stop.set)
+    previous = signal.getsignal(signal.SIGINT) if manage_signals else None
+    if manage_signals:
+        loop.add_signal_handler(signal.SIGINT, stop.set)
     try:
         async with connect(
             LIVE_URL,
@@ -900,6 +952,11 @@ async def connect_voice(
                 web=web,
                 composio=composio,
                 sms=sms,
+                continuity=continuity,
+                resume_context=resume_context,
+                greet=greet,
+                idle_seconds=idle_seconds,
+                activation_cue=activation_cue,
             )
         # Both session.closed and WebSocket close precede telephone audio.
         if stats.phone_contact is None or stop.is_set():
@@ -926,5 +983,6 @@ async def connect_voice(
         )
         return stats
     finally:
-        loop.remove_signal_handler(signal.SIGINT)
-        signal.signal(signal.SIGINT, previous)
+        if manage_signals:
+            loop.remove_signal_handler(signal.SIGINT)
+            signal.signal(signal.SIGINT, previous)

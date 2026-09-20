@@ -2,8 +2,11 @@
 """Convert the client's 24 kHz mono PCM to Dan's 44.1 kHz stereo Bluetooth FIFO."""
 
 import argparse
+import math
 import os
+import struct
 import sys
+import time
 from array import array
 from pathlib import Path
 
@@ -48,9 +51,41 @@ class Resampler:
         return output.tobytes()
 
 
-def converted_input(gain=1):
+def speech_lead_in(chunks, *, clock=time.monotonic):
+    """Prime a speaker's silence gate without trimming the following PCM.
+
+    A quiet 180 ms tone precedes the first sound and sounds after >=500 ms
+    silence. Account for both PCM silence and gaps in the input stream.
+    Keep this in the Bluetooth adapter; other audio devices need no cue.
+    """
+    count = 4320  # 180 ms at 24 kHz
+    cue = struct.pack(
+        f"<{count}h",
+        *(round(240 * min(i / 240, (count - 1 - i) / 240, 1)
+                * math.sin(2 * math.pi * 220 * i / 24000)) for i in range(count)),
+    )
+    quiet = 0.5
+    previous = clock()
+    for data in chunks:
+        now = clock()
+        if any(data):
+            if quiet >= 0.5 or now - previous >= 0.5:
+                # Small chunks preserve the FIFO writer's bounded backpressure.
+                for offset in range(0, len(cue), 960):
+                    yield cue[offset : offset + 960]
+            quiet = 0.0
+        else:
+            quiet += len(data) / 48000
+        yield data
+        previous = clock()
+
+
+def converted_input(gain=1, *, lead_in=False):
     resampler = Resampler(gain=gain)
-    while data := os.read(sys.stdin.fileno(), 960):
+    chunks = iter(lambda: os.read(sys.stdin.fileno(), 960), b"")
+    if lead_in:
+        chunks = speech_lead_in(chunks)
+    for data in chunks:
         if output := resampler.feed(data):
             yield output
     if output := resampler.feed(b"", final=True):
@@ -74,7 +109,7 @@ def main():
     try:
         # Reuse the driver's bounded FIFO writes, backpressure, and disconnect handling.
         # Slightly attenuate both assistant speech and phone audio before Bluetooth playback.
-        send_pcm(converted_input(gain=0.60))
+        send_pcm(converted_input(gain=0.60, lead_in=True))
     except (OSError, ValueError, TimeoutError) as error:
         parser.exit(1, f"Bluetooth playback: {error}\n")
 

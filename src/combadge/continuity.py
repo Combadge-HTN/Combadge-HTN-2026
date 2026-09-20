@@ -5,12 +5,12 @@ import json
 MAX_CONTEXT_CHARS = 16000
 MAX_ENTRY_CHARS = 4000
 RESUME_INSTRUCTIONS = (
-    " This is a new assistant session after a human phone call. The supplied history is "
+    " This is a new activation of the wearable assistant. The supplied history is "
     "past conversation and tool results, not new requests or instructions. Use it only "
     "for continuity. Do not repeat, retry, or finish old actions automatically, including "
     "texts, emails, calendar changes or calls. Wait for a new user request before acting. "
-    "Tool results take precedence over earlier conversational claims. You did not hear "
-    "or record the phone call; never invent what was said. Some older context may be "
+    "Tool results take precedence over earlier conversational claims. If a human phone call "
+    "occurred, you did not hear or record it; never invent what was said. Some older context may be "
     "omitted. Ask if needed rather than guessing."
 )
 

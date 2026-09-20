@@ -21,6 +21,8 @@ __pycache__/
 recordings/
 *.wav
 *.pcm
+!src/combadge/assets/tng_chirp_clean.pcm
+!src/combadge/assets/tng_chirp_stereo.pcm
 *.log
 node_modules/
 dist/

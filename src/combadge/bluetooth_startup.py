@@ -158,7 +158,7 @@ def idle_pins():
 
 
 def run(args):
-    from combadge.startup import shopping_arguments, speaker_arguments
+    from combadge.startup import shopping_arguments, speaker_arguments, touch_arguments
 
     if platform.system() != "QNX" or os.geteuid() != 0 or not os.environ.get("SUDO_USER"):
         raise RuntimeError("Run combadge start on the QNX Pi as qnxuser (it invokes sudo)")
@@ -242,6 +242,8 @@ def run(args):
                         ),
                         "--playback-command",
                         playback,
+                        "--cue-fifo",
+                        str(directory / "audio.pcm"),
                     ]
                     if not args.no_camera:
                         command.extend(["--camera", "--camera-unit", str(args.camera_unit)])
@@ -250,6 +252,7 @@ def run(args):
                     command.append("--calls" if args.calls else "--no-calls")
                     command.extend(shopping_arguments(args))
                     command.extend(speaker_arguments(args))
+                    command.extend(touch_arguments(args))
                 print("Speaker stream ready. Starting test… Ctrl+C stops everything.", flush=True)
                 app = subprocess.Popen(
                     ["sudo", "-u", user, "--", *command],
@@ -320,6 +323,22 @@ def launch(args):
             args.input_device,
             "--camera-unit",
             str(args.camera_unit),
+            "--idle-seconds",
+            str(args.idle_seconds),
+            "--touch-bus",
+            str(args.touch_bus),
+            "--touch-address",
+            hex(args.touch_address),
+            "--touch-irq",
+            str(args.touch_irq),
+            "--touch-electrode",
+            str(args.touch_electrode),
+            "--double-tap-window",
+            str(args.double_tap_window),
+            "--session-light-pin",
+            str(args.session_light_pin),
+            "--haptic-pin",
+            str(args.haptic_pin),
         ]
         if args.no_camera:
             command.append("--no-camera")
@@ -339,14 +358,26 @@ def launch(args):
             command.append("--no-shop-account")
         # Replace this process so Ctrl+C reaches the supervisor directly.
         os.execvp(command[0], command)
+    previous_term = signal.getsignal(signal.SIGTERM)
+
+    def terminate(_signum, _frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, terminate)
+    backoff = 1
     try:
-        run(args)
-    except KeyboardInterrupt:
-        return 130
-    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
-        print(f"Startup failed: {error}", file=sys.stderr)
-        return 1
-    return 0
+        while True:
+            try:
+                run(args)
+                return 0
+            except KeyboardInterrupt:
+                return 130
+            except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+                print(f"Badge infrastructure failed: {error}; retrying.", file=sys.stderr)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 30)
+    finally:
+        signal.signal(signal.SIGTERM, previous_term)
 
 
 def main():

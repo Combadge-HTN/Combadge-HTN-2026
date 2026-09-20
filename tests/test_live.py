@@ -144,6 +144,65 @@ def test_shopping_tools_are_opt_in_and_snapshot_is_independently_optional():
     assert "capture_snapshot" in {t["name"] for t in both["delegation"]["responses"]["tools"]}
 
 
+def test_touch_session_is_silent_and_closes_after_idle_timeout():
+    class QuietAudio(FakeAudio):
+        async def write(self, data):
+            self.output.append(data)
+
+    async def scenario():
+        stop = asyncio.Event()
+        connection = FakeConnection()
+        audio = QuietAudio(stop)
+        cue = b"\x01\x00" * 12
+        stats = await run_session(
+            connection,
+            audio,
+            Settings(),
+            stop,
+            seconds=1,
+            greet=False,
+            idle_seconds=0.02,
+            activation_cue=cue,
+            report=lambda _: None,
+        )
+        assert cue in audio.output
+        assert not any(
+            message["type"] == "session.instructions.append" for message in connection.messages
+        )
+        assert stats.finalized
+
+    asyncio.run(scenario())
+
+
+def test_continuous_silent_output_does_not_prevent_idle_shutdown():
+    class QuietAudio(FakeAudio):
+        async def write(self, data):
+            self.output.append(data)
+
+    async def scenario():
+        stop = asyncio.Event()
+        connection = FakeConnection()
+
+        async def silence():
+            while True:
+                await connection.events.put(audio_event(bytes(FRAME_BYTES)))
+                await asyncio.sleep(0.005)
+
+        producer = asyncio.create_task(silence())
+        try:
+            async with asyncio.timeout(1):
+                result = await run_session(
+                    connection, QuietAudio(stop), Settings(), stop,
+                    seconds=5, greet=False, idle_seconds=0.03, report=lambda _: None,
+                )
+            assert result.finalized
+        finally:
+            producer.cancel()
+            await asyncio.gather(producer, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
 def test_shopping_without_capture_runs_tools_and_keeps_audio_flowing():
     class Shopping:
         image = None

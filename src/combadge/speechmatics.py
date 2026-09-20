@@ -348,3 +348,11 @@ class StreamingSpeakerInput:
         self.batches.clear()
         self.words.clear()
         self.gates.clear()
+        from combadge.speaker_input import AttributionBuffer
+
+        self.buffer = AttributionBuffer(self.names)
+        self.outgoing = asyncio.Queue(maxsize=100)
+        self.available = asyncio.Event()
+        self.live_samples = 0
+        self.prepared = 0
+        self.sequence = 0

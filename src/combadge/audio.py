@@ -1,11 +1,15 @@
 """PCM audio transports for voice sessions."""
 
 import asyncio
+import errno
+import os
 import queue
+import stat
 import shutil
 import subprocess
 import sys
 from contextlib import suppress
+from importlib.resources import files
 from typing import Protocol
 
 RATE = 24_000
@@ -187,6 +191,55 @@ class CommandAudio:
             for pipe in (process.stdin, process.stdout, process.stderr):
                 if pipe is not None:
                     pipe.close()
+
+
+async def play_fifo_cue(path) -> None:
+    """Play the preconverted badge cue on an idle Bluetooth FIFO, no subprocess.
+
+    The caller must await termination of any speech writer before invoking this.
+    Nonblocking writes keep cancellation responsive, even on a stalled radio.
+    """
+    data = files("combadge").joinpath("assets/tng_chirp_stereo.pcm").read_bytes()
+    fd = None
+    try:
+        async with asyncio.timeout(3):
+            while fd is None:
+                try:
+                    fd = os.open(path, os.O_WRONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+                except OSError as error:
+                    if error.errno != errno.ENXIO:
+                        raise
+                    await asyncio.sleep(0.005)
+            if not stat.S_ISFIFO(os.fstat(fd).st_mode):
+                raise ValueError("Chirp output must be a named pipe")
+            pending = memoryview(data + bytes(4410 * 4))
+            while pending:
+                try:
+                    count = os.write(fd, pending[:1764])
+                    if not count:
+                        raise RuntimeError("Bluetooth cue writer stopped")
+                    pending = pending[count:]
+                except BlockingIOError:
+                    await asyncio.sleep(0.005)
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+async def play_local_cue(playback_command: list[str], cue: bytes) -> None:
+    """Play a finite local acknowledgement without capture or a cloud session."""
+    audio = CommandAudio([], playback_command)
+    try:
+        async with asyncio.timeout(5):
+            await audio.start_playback()
+            # A short silent tail lets the final cue samples leave the Bluetooth
+            # FIFO before microphone startup. EOF flushes the resampler, too.
+            data = cue + bytes(RATE // 5 * 2)
+            for offset in range(0, len(data), FRAME_BYTES):
+                await audio.write(data[offset : offset + FRAME_BYTES])
+            await audio.drain()
+    finally:
+        await audio.close()
 
 
 class AlsaAudio(CommandAudio):

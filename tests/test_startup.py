@@ -6,6 +6,21 @@ from combadge.cli import main
 from combadge.startup import ROOT, launch
 
 
+@pytest.fixture(autouse=True)
+def one_touch_activation(monkeypatch):
+    """Keep startup composition tests finite now that `start` is a daemon."""
+
+    async def run_once(session, **kwargs):
+        import asyncio
+
+        from combadge.continuity import VoiceContinuity
+
+        await session(asyncio.Event(), VoiceContinuity(), None, b"cue")
+        return 0
+
+    monkeypatch.setattr("combadge.device.run_badge", run_once)
+
+
 def test_start_uses_console_camera_and_repo_environment_from_any_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     with patch("combadge.startup.launch", return_value=0) as routed:
@@ -15,6 +30,7 @@ def test_start_uses_console_camera_and_repo_environment_from_any_directory(tmp_p
         assert launch(args) == 0
     command = voice.call_args.args[0]
     assert command[:3] == ["voice", "--audio-backend", "console"]
+    assert "--touch-activate" in command
     assert command[command.index("--env-file") + 1] == str(ROOT / ".env")
     assert command[command.index("--camera-unit") + 1] == str(args.camera_unit)
     assert "--shopify" in command

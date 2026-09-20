@@ -66,12 +66,40 @@ human phone calls, turn on the speaker and run on the Pi:
 combadge start
 ```
 
+`start` is a long-lived badge controller. It keeps Bluetooth ready while leaving
+the microphone and GPT-Live disconnected. Double tap MPR121 electrode 0 to
+activate; the badge responds with the locally stored TNG communicator chirp
+selected from TrekCore and a GPIO 15 haptic pulse. On the Bluetooth badge,
+the chirp plays locally before connecting the AI or starting the microphone;
+individual taps do not play it. The same chirp plays on normal session exit,
+after the speech writer has stopped. Bluetooth chirps use preconverted PCM
+directly, without starting a playback helper. Wake vibration runs concurrently.
+GPIO 14 stays high for the complete AI interaction or handed-off human call.
+Double tap again to stop, or allow two quiet seconds after playback and tool work
+to return the badge to idle. Recent conversation context is retained only in
+memory and disappears when the process stops.
+
+Haptic timing is 250 ms on activation, two 150 ms pulses on exit, and three
+120 ms pulses on failure. The Bluetooth playback adapter adds a quiet 180 ms
+lead-in before sound after at least 500 ms of silence to mitigate clipped
+speech openings on the TWS speaker. This adds a small response delay and may
+be faintly audible; physical listening tests are required to verify the effect.
+
+For manual background operation, redirect its diagnostics and retain its PID:
+
+```sh
+combadge start >~/combadge.log 2>&1 &
+echo $! >~/combadge.pid
+```
+
+Send `SIGTERM` to that PID for ordered audio, GPIO, Bluetooth, and session cleanup.
+
 Bluetooth and calling are enabled by default. Calling requires configured phone
 credentials and contacts in the checkout's `.env`, which is used from any working
 directory. Use `--no-calls` to disable calling. Shopify search is enabled, and an existing
 Shop login is used automatically. Startup selects physical camera unit 3 when
 present, otherwise unit 4; `--camera-unit N` overrides this choice.
-Say **“Computer, look at this”** to capture a
+After activating, say **“Computer, look at this”** to capture a
 camera image. Press **Ctrl+C** to stop. The default session limit is one hour;
 use `combadge start --max-seconds 180` for a short test, or `--no-camera` for
 use without the camera. Use `--no-bluetooth` for console-only replies; that mode

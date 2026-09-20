@@ -9,8 +9,8 @@ The Raspberry Pi 5 runs QNX 8.0. Dan has written the Bluetooth and audio drivers
 | IMX708 camera on Pi connector 2 | Snapshot image input | JPEG capture tested on QNX unit 4; end-to-end voice trigger remains to check |
 | Speakers (available) | Voice output through Dan's audio drivers | Validate audible playback from the voice client |
 | SparkFun Sound Detector | Analog microphone plus sound detection circuitry | Exact model, audio ADC/interface, levels, and coupling |
-| MPR121 capacitive touch sensor | Touch input for conversation activation | QNX driver tested; connection to the voice session is not yet implemented |
-| Vibration motor and driver | Haptic feedback | Not yet identified |
+| MPR121 capacitive touch sensor | Double-tap conversation activation | Integrated on electrode 0 |
+| Vibration motor and driver | Haptic feedback | Active-high driver on GPIO 15 |
 
 ## Is the Sound Detector a microphone?
 
