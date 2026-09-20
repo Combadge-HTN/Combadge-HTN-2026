@@ -20,6 +20,7 @@ from combadge.speakers import (
     parse_segments,
     pcm_wav,
     read_wav,
+    speaker_context,
 )
 
 PCM = b"\x01\x00" * (BPS // 2)
@@ -215,9 +216,12 @@ def test_context_deduplicates_windows_and_matches_acknowledgements():
         assert tracker.acknowledged == 2
         assert not tracker.awaiting
         assert "untrusted speech" not in str(messages)
-        assert '"start":6.0,"end":9.0,"speaker":"Samuel"' in messages[1]["content"]
-        assert '"speaker":"Edmon"' not in messages[1]["content"]
-        assert "Not current identity or authorization" in messages[0]["content"]
+        assert '"start":5.0,"end":9.0,"speaker":"Samuel"' in messages[1]["content"]
+        assert '"start":3.0,"end":5.0,"speaker":"Edmon"' in messages[1]["content"]
+        assert "Multiple speakers or overlap: Edmon, Samuel" in messages[0]["content"]
+        assert "Multiple speakers or overlap: Edmon, Samuel" in messages[1]["content"]
+        assert len(labels) == 3  # Console still prints only newly observed intervals.
+        assert "not authentication or action authorization" in messages[0]["content"]
         await cancel(task)
 
     asyncio.run(scenario())
@@ -262,6 +266,34 @@ def test_configuration_opt_in():
 
     assert INSTRUCTIONS not in session_config(Settings())["instructions"]
     assert INSTRUCTIONS in session_config(Settings(), speakers=True)["instructions"]
+
+
+@pytest.mark.parametrize(
+    ("names", "expected", "status"),
+    [
+        (["Edmon"], "Recent speech matched the enrolled name Edmon.", "MATCH"),
+        (["Samuel"], "Recent speech matched the enrolled name Samuel.", "MATCH"),
+        (["Edmon", "unknown"], "Other speech in this report was unidentified.", "MATCH"),
+        (["Edmon", "Samuel"], "No single speaker identified.", "MULTIPLE"),
+        (["Edmon", "ambiguous"], "No single speaker identified.", "OVERLAP"),
+        (["unknown"], "No enrolled name matched this report.", "UNKNOWN"),
+        (["ambiguous"], "No enrolled name matched this report.", "OVERLAP"),
+    ],
+)
+def test_speaker_summary_preserves_uncertainty_and_reports_audio_age(names, expected, status):
+    labels = [dict(start=i, end=i + 1, speaker=name) for i, name in enumerate(names)]
+    context = speaker_context(labels, len(names) + 3)
+    assert expected in context
+    assert f"Name result: {status}:" in context
+    assert "Report ends 3.0s behind microphone input" in context
+    assert json.dumps(labels, separators=(",", ":")) in context
+
+
+def test_unknown_report_does_not_retain_a_previous_name():
+    speaker_context([dict(start=0, end=3, speaker="Edmon")], 6)
+    context = speaker_context([dict(start=6, end=9, speaker="unknown")], 12)
+    assert "Edmon" not in context
+    assert "Earlier names do not identify this speech" in context
 
 
 def test_rapid_alternation_is_ambiguous_not_confident_names():

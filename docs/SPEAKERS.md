@@ -43,7 +43,9 @@ Expect the first identity update after six seconds of captured audio **plus API 
 
 Each result describes individual speech intervals, so two people speaking consecutively within a single turn can receive different labels. Names appear as separate timestamped estimates in the console; existing transcript captions are not rewritten. `--no-captions` hides both transcripts and speaker estimates while retaining failure notices.
 
-The worker sends compact observations using `session.thinking.append`. Offsets count input samples from the first microphone frame, not transcript event timestamps. The assistant is instructed to use names only when it can unambiguously match the relevant speech, never to treat a historical label as the current speaker. Server acknowledgments confirm context acceptance, not that a particular reply used the label correctly.
+The worker sends a plain-language match summary and the complete analyzed window using `session.thinking.append`. Console output still omits repeated intervals, but that must not remove another speaker from the model's evidence. Offsets count input samples from the first microphone frame, not transcript event timestamps.
+
+When asked a name question, the assistant can report the badge's recent enrolled-voice match. It must distinguish that estimate from proof of who asked the current question. Unknown reports do not carry an earlier name forward; multiple names or overlap cannot identify a single speaker. Server acknowledgments confirm context acceptance, not that a particular reply used the label correctly.
 
 ## Uncertainty and failure handling
 
@@ -74,5 +76,13 @@ combadge speakers /path/to/conversation.wav \
 ```
 
 This prints segment names/times and elapsed analysis time, using API credits without opening audio devices. Test each speaker individually, sequential speakers, an unenrolled person, simultaneous speech, background noise, and short interjections. Then verify spoken attribution in a real voice session; accepted context alone does not prove the assistant used it correctly.
+
+To check the model handoff separately from recognition, run:
+
+```sh
+python scripts/check_speaker_context.py --env-file .env
+```
+
+This opt-in check uses paid TTS and Live API requests with generated speech and scripted matcher results. It opens no audio devices and uses no personal recordings. It checks two enrolled names, unknown speech, multiple speakers, overlap, and a named-then-unknown transition. Use `--case overlap`, for example, to rerun one case. Review the printed answers for appropriate uncertainty; automated name-presence checks alone do not establish semantic correctness or recognition accuracy.
 
 References: [transcription API](https://developers.openai.com/api/reference/python/resources/audio/subresources/transcriptions/methods/create), [Live context injection](https://developers.openai.com/api/docs/guides/live-conversations#add-context-during-the-conversation).
