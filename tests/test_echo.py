@@ -1,11 +1,29 @@
 import ctypes.util
 import math
+import os
 import random
 import struct
 
 import pytest
 
 from combadge.echo import EchoReference, SpeexEcho, configured_echo
+
+
+@pytest.fixture
+def speex_library():
+    # QNX's configured library can be present even when find_library returns None.
+    for path in (
+        os.environ.get("COMBADGE_AEC_LIBRARY"),
+        ctypes.util.find_library("speexdsp"),
+        "/usr/lib/libspeexdsp.so.1",
+    ):
+        if path:
+            try:
+                ctypes.CDLL(path)
+            except OSError:
+                continue
+            return path
+    pytest.skip("Native SpeexDSP is optional and no usable library was found")
 
 
 def test_reference_tracks_delay_silence_and_bounds():
@@ -62,10 +80,8 @@ def test_causal_headroom_is_applied_without_accepting_invalid_delay(monkeypatch)
             configured_echo(settings)
 
 
-def test_native_canceller_reduces_echo_and_preserves_near_end_speech():
-    if not ctypes.util.find_library("speexdsp"):
-        pytest.skip("Native SpeexDSP is optional")
-    echo = SpeexEcho()
+def test_native_canceller_reduces_echo_and_preserves_near_end_speech(speex_library):
+    echo = SpeexEcho(speex_library)
     rng = random.Random(731)
     references = []
     raw_energy = clean_energy = near_energy = error_energy = 0
@@ -101,9 +117,7 @@ def test_native_canceller_reduces_echo_and_preserves_near_end_speech():
         echo.process(bytes(960), bytes(960))
 
 
-def test_native_cancellation_with_jittery_io_preserves_interruption():
-    if not ctypes.util.find_library("speexdsp"):
-        pytest.skip("Native SpeexDSP is optional")
+def test_native_cancellation_with_jittery_io_preserves_interruption(speex_library):
     rng = random.Random(894)
     far = [[rng.randint(-6000, 6000) for _ in range(480)] for _ in range(700)]
     now = [0.0]
@@ -113,7 +127,7 @@ def test_native_cancellation_with_jittery_io_preserves_interruption():
         events.append((i * 0.02 + (0.009 if i % 3 else 0), "render", i))
         events.append(((i + 1) * 0.02 + (0.012 if i % 2 else 0), "capture", i))
     raw_energy = clean_energy = near_energy = error_energy = 0
-    echo = SpeexEcho()
+    echo = SpeexEcho(speex_library)
     try:
         for at, kind, i in sorted(events):
             now[0] = at
