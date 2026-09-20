@@ -26,14 +26,16 @@ async def contacts(settings):
         return event["names"]
 
 
-async def call_contact(settings, contact, audio, *, seconds=300, report=print):
-    """Audio is already started; caller owns its lifecycle. Cancellation hangs up."""
+async def call_contact(settings, contact, audio, *, seconds=300, report=print, start_audio=False):
+    """Optionally start audio when media can flow; caller owns close. Cancellation hangs up."""
     from combadge.phone.config import SipSettings
 
     if isinstance(settings, SipSettings):
         from combadge.phone.direct import call_contact as direct_call
 
-        return await direct_call(settings, contact, audio, seconds=seconds, report=report)
+        return await direct_call(
+            settings, contact, audio, seconds=seconds, report=report, start_audio=start_audio
+        )
     from websockets.asyncio.client import connect
     from websockets.exceptions import ConnectionClosed
 
@@ -51,6 +53,8 @@ async def call_contact(settings, contact, audio, *, seconds=300, report=print):
         hello = json.loads(await asyncio.wait_for(ws.recv(), 10))
         if hello.get("type") != "contacts" or contact.casefold() not in hello["names"]:
             raise ValueError("Unknown contact; configure it on the relay")
+        if start_audio:
+            await audio.start()
         await ws.send(json.dumps({"type": "call", "contact": contact.casefold()}))
         playback = asyncio.Queue(maxsize=50)
         outcome = "ended"
@@ -133,10 +137,9 @@ async def call_until_stopped(settings, contact, audio, stop, *, report=print):
     try:
         if stop.is_set():
             return None
-        await audio.start()
-        if stop.is_set():
-            return None
-        call = asyncio.create_task(call_contact(settings, contact, audio, report=report))
+        call = asyncio.create_task(
+            call_contact(settings, contact, audio, report=report, start_audio=True)
+        )
         stopped = asyncio.create_task(stop.wait())
         tasks = [call, stopped]
         await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)

@@ -73,9 +73,8 @@ def run(args, parser: argparse.ArgumentParser):
 
             async def connect():
                 try:
-                    await audio.start()
                     return await call_contact(
-                        settings, args.contact, audio, seconds=args.max_seconds
+                        settings, args.contact, audio, seconds=args.max_seconds, start_audio=True
                     )
                 finally:
                     await audio.close()

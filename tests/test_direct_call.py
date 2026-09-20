@@ -179,3 +179,72 @@ def test_direct_call_auth_audio_and_hangup(monkeypatch, ending):
                 udp.close()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("outcome", ["answered", "busy", "cancel-ringing", "capture-fails"])
+def test_managed_capture_starts_only_after_answer_and_always_hangs_up(monkeypatch, outcome):
+    async def scenario():
+        ringing = asyncio.Event()
+        answer_ready = asyncio.Event()
+
+        class Audio:
+            starts = 0
+
+            async def start(self):
+                assert answer_ready.is_set()
+                self.starts += 1
+                if outcome == "capture-fails":
+                    raise RuntimeError("Capture unavailable")
+
+        class Call:
+            invited = False
+            ended = False
+            closed = False
+            sent_packets = received_packets = rejected_packets = 0
+
+            async def open(self):
+                pass
+
+            async def invite(self):
+                self.invited = True
+                ringing.set()
+                await answer_ready.wait()
+                return outcome != "busy"
+
+            async def signaling(self):
+                await asyncio.Future()
+
+            async def media_loop(self, audio):
+                assert audio.starts == 1
+
+            async def hangup(self):
+                self.ended = True
+
+            async def close(self):
+                self.closed = True
+
+        audio, call = Audio(), Call()
+        monkeypatch.setattr(direct, "crypto", lambda: None)
+        monkeypatch.setattr(direct, "SipCall", lambda *_: call)
+        task = asyncio.create_task(
+            direct.call_contact(settings(), "edmon", audio, start_audio=True)
+        )
+        await asyncio.wait_for(ringing.wait(), 1)
+        # No recorder exists during setup/ringing, regardless of answer latency.
+        assert audio.starts == 0
+        if outcome == "cancel-ringing":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            answer_ready.set()
+            if outcome == "capture-fails":
+                result = await task
+                assert result["status"] == "failed"
+                assert result["error"]
+            else:
+                await task
+        assert audio.starts == (1 if outcome in ("answered", "capture-fails") else 0)
+        assert call.ended and call.closed
+
+    asyncio.run(scenario())
