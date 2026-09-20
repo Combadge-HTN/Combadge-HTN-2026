@@ -349,9 +349,11 @@ def test_plain_start_loads_saved_speakers_from_default_env_before_bluetooth(tmp_
     assert bluetooth.call_args.args[0].speaker == expected
 
 
-def test_saved_speakers_survive_sudo_and_reach_streaming_voice(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("backend", ["auto", "local"])
+def test_saved_speakers_and_backend_survive_sudo(tmp_path, monkeypatch, capsys, backend):
     import argparse
 
+    from combadge.local_speakers import LocalSpeakerInput
     from combadge.speechmatics import StreamingSpeakerInput
     from combadge.startup import add_arguments
 
@@ -363,7 +365,18 @@ def test_saved_speakers_survive_sudo_and_reach_streaming_voice(tmp_path, monkeyp
         patch("combadge.bluetooth_startup.os.execvp", side_effect=SystemExit) as execute,
         pytest.raises(SystemExit),
     ):
-        main(["start", "--env-file", str(env), "--no-calls", "--no-camera", "--no-shopify"])
+        main(
+            [
+                "start",
+                "--env-file",
+                str(env),
+                "--no-calls",
+                "--no-camera",
+                "--no-shopify",
+                "--speaker-backend",
+                backend,
+            ]
+        )
     command = execute.call_args.args[1]
     monkeypatch.chdir(tmp_path.parent)
     parser = argparse.ArgumentParser()
@@ -373,9 +386,11 @@ def test_saved_speakers_survive_sudo_and_reach_streaming_voice(tmp_path, monkeyp
     args.bluetooth = False
     with patch("combadge.live.connect_voice") as connect:
         assert launch(args) == 0
-    assert isinstance(connect.call_args.kwargs["speaker_input"], StreamingSpeakerInput)
+    expected_type = LocalSpeakerInput if backend == "local" else StreamingSpeakerInput
+    assert isinstance(connect.call_args.kwargs["speaker_input"], expected_type)
     assert connect.call_args.kwargs["speaker_tracker"] is None
-    assert "Speechmatics streaming configured for Edmon, Samuel" in capsys.readouterr().out
+    label = "Local CAM++" if backend == "local" else "Speechmatics streaming"
+    assert f"{label} configured for Edmon, Samuel" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("options", [["--no-speakers"], ["--tone"]])
