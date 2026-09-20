@@ -25,6 +25,8 @@ that the first reply already has the speaker's name. Voice estimates are not aut
 Requires the QNX native `clang`, `clang++`, `cmake`, `ninja`, `git`, `apk`, and Python
 3.14 tools. The script builds in a separate directory and does not install system
 libraries. Internet access is needed to fetch pinned sources and dependencies.
+The build applies the [documented runtime corrections](../native/speaker/README.md),
+including an upstream fix for CAM++'s partial-window average pooling.
 
 ```sh
 sh scripts/build-qnx-speaker-runtime.sh "$HOME/local-speakers"
@@ -71,3 +73,21 @@ The feature pipeline follows sherpa-onnx: normalized 16 kHz samples, 80-bin Kald
 filterbanks, no dither, reflected frame edges, a 7.6 kHz upper filterbank limit,
 and per-bin mean subtraction. The worker uses the same resampling and extraction
 for enrollment and incoming speech.
+
+## QNX Pi 5 validation
+
+Tested with Python 3.14.0, QNX 8.0.0 aarch64le, the patched QNX ONNX Runtime
+1.23.2 port, and two inference threads. Model loading took 0.88 seconds; enrolling
+both four-second references took 0.49 seconds. The persistent worker processed
+each 1.5-second audio window in 93–97 ms, including resampling and feature extraction.
+The window collection time is additional; these numbers are not first-reply latency.
+
+With disjoint enrollment and held-out speech, Edmon matched in 6/6 overlapping
+windows and Samuel in 9/9. A synthetic unknown remained unknown in 9/9 windows.
+This small recorded-data check is not a population accuracy estimate or a
+microphone/speaker feedback test.
+
+Native checks verify process reuse across idle gaps, bounded request sizes,
+resampling consistency, and a generated signal's embedding against a known
+reference. The reference check caught incorrect pooling in the older runtime;
+the patched build passes it without changing model weights or match thresholds.

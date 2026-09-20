@@ -5,9 +5,12 @@ No recordings, microphone, cloud services, or API keys are used.
 """
 
 import asyncio
+import json
 import math
 import os
+import random
 import struct
+from pathlib import Path
 
 import pytest
 
@@ -40,6 +43,10 @@ def test_native_process_reuses_model_and_resampling_preserves_embedding():
         process = worker.process
         try:
             reference = await worker.embed(signal(16000), 16000)
+            # QNX previously treated an idle, still-open stdin as EOF after one
+            # request. Keep the same worker alive across realistic input gaps.
+            await asyncio.sleep(0.1)
+            assert process.returncode is None
             again = await worker.embed(signal(16000), 16000)
             resampled = await worker.embed(signal(24000), 24000)
             assert sum(a * b for a, b in zip(reference, again)) > 0.99999
@@ -75,5 +82,35 @@ def test_native_rejects_oversized_request_without_allocating_payload():
             if process.returncode is None:
                 process.kill()
                 await process.wait()
+
+    asyncio.run(scenario())
+
+
+def test_native_matches_reference_embedding_for_generated_signal():
+    # No recorded voice: deterministic chirp + tone + noise. The reference was
+    # cross-checked against the official Python ONNX Runtime CPU implementation.
+    # Self-consistency alone did not catch an incorrect QNX inference result.
+    rng = random.Random(739)
+    pcm = bytearray()
+    for i in range(36000):
+        t = i / 24000
+        value = (
+            4000 * math.sin(2 * math.pi * (130 * t + 110 * t * t))
+            + 2000 * math.sin(2 * math.pi * 1301 * t)
+            + 1200 * rng.uniform(-1, 1)
+        )
+        pcm.extend(struct.pack("<h", round(value)))
+    reference = json.loads(
+        (Path(__file__).parent / "fixtures/campplus-synthetic-embedding.json").read_text()
+    )
+
+    async def scenario():
+        worker = Worker(WORKER, MODEL)
+        await worker.start()
+        try:
+            actual = await worker.embed(bytes(pcm), 24000)
+            assert sum(a * b for a, b in zip(reference, actual)) > 0.999
+        finally:
+            await worker.close()
 
     asyncio.run(scenario())

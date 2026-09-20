@@ -21,6 +21,14 @@ if [ "$(git -C "$prefix/onnxruntime" rev-parse HEAD)" != 1fd5b38211fc88d07fff8db
     echo 'Unexpected ONNX Runtime revision; expected pinned qnx-v1.23.2 commit.' >&2
     exit 1
 fi
+# See native/speaker/README.md for the pinned upstream fix and link dependency.
+for patch_name in onnxruntime-fp16-helper.patch onnxruntime-averagepool-ceil.patch; do
+    runtime_patch="$root/native/speaker/$patch_name"
+    if ! git -C "$prefix/onnxruntime" apply --reverse --check "$runtime_patch" 2>/dev/null; then
+        git -C "$prefix/onnxruntime" apply --check "$runtime_patch"
+        git -C "$prefix/onnxruntime" apply "$runtime_patch"
+    fi
+done
 cmake -S "$prefix/onnxruntime/cmake" -B "$prefix/ort-build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
     -DCMAKE_C_FLAGS=-D_QNX_SOURCE -DCMAKE_CXX_FLAGS=-D_QNX_SOURCE \

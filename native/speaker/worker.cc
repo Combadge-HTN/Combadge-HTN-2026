@@ -5,12 +5,59 @@
 #include "kaldi-native-fbank/csrc/online-feature.h"
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <numeric>
+#include <poll.h>
 #include <stdexcept>
+#include <unistd.h>
 #include <vector>
+
+// Use descriptor I/O: QNX's C++ stdin buffering can report EOF between requests
+// even while the Python writer remains open. Also handle partial transfers and
+// interrupted/nonblocking pipes explicitly.
+static void wait_pipe(int fd, short events) {
+  pollfd descriptor{fd, events, 0};
+  while (poll(&descriptor, 1, -1) < 0) {
+    if (errno != EINTR) throw std::runtime_error(std::strerror(errno));
+  }
+}
+
+static bool read_exact(void* destination, size_t size) {
+  auto* bytes = static_cast<char*>(destination);
+  size_t received = 0;
+  while (received < size) {
+    auto count = read(STDIN_FILENO, bytes + received, size - received);
+    if (count > 0) received += static_cast<size_t>(count);
+    else if (count == 0) {
+      if (received == 0) return false;
+      throw std::runtime_error("truncated request");
+    } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      wait_pipe(STDIN_FILENO, POLLIN);
+    } else if (errno != EINTR) {
+      throw std::runtime_error(std::strerror(errno));
+    }
+  }
+  return true;
+}
+
+static void write_exact(const void* source, size_t size) {
+  const auto* bytes = static_cast<const char*>(source);
+  size_t sent = 0;
+  while (sent < size) {
+    auto count = write(STDOUT_FILENO, bytes + sent, size - sent);
+    if (count > 0) sent += static_cast<size_t>(count);
+    else if (count == 0) throw std::runtime_error("empty pipe write");
+    else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      wait_pipe(STDOUT_FILENO, POLLOUT);
+    } else if (errno != EINTR) {
+      throw std::runtime_error(std::strerror(errno));
+    }
+  }
+}
 
 static std::vector<float> resample(const std::vector<int16_t>& pcm, uint32_t rate) {
   constexpr double pi = 3.14159265358979323846;
@@ -66,18 +113,16 @@ int main(int argc, char** argv) {
     const char* inputs[] = {"x"};
     const char* outputs[] = {"embedding"};
     auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    std::cout.write("CSP1", 4).flush();
+    write_exact("CSP1", 4);
     for (;;) {
       std::array<uint32_t, 2> header{};
-      std::cin.read(reinterpret_cast<char*>(header.data()), sizeof(header));
-      if (std::cin.gcount() == 0 && std::cin.eof()) return 0;
-      if (!std::cin) throw std::runtime_error("truncated request header");
+      if (!read_exact(header.data(), sizeof(header))) return 0;
       auto [rate, count] = header;
       if (rate < 8000 || rate > 96000 || count < rate / 2 || count > rate * 10)
         throw std::runtime_error("expected 0.5-10 seconds of mono PCM16 at 8-96kHz");
       std::vector<int16_t> pcm(count);
-      std::cin.read(reinterpret_cast<char*>(pcm.data()), count * sizeof(int16_t));
-      if (!std::cin) throw std::runtime_error("truncated PCM");
+      if (!read_exact(pcm.data(), count * sizeof(int16_t)))
+        throw std::runtime_error("truncated PCM");
       auto samples = resample(pcm, rate);
       knf::FbankOptions config;
       config.frame_opts.samp_freq = 16000;
@@ -111,8 +156,7 @@ int main(int argc, char** argv) {
         throw std::runtime_error("invalid embedding");
       std::array<float, 512> embedding{};
       for (int i = 0; i < 512; ++i) embedding[i] = raw[i] / std::sqrt(norm);
-      std::cout.write(reinterpret_cast<char*>(embedding.data()), sizeof(embedding)).flush();
-      if (!std::cout) return 1;
+      write_exact(embedding.data(), sizeof(embedding));
     }
   } catch (const std::exception& e) {
     std::cerr << "Speaker worker: " << e.what() << '\n';
