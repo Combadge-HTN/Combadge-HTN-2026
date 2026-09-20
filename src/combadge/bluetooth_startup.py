@@ -247,6 +247,7 @@ def run(args):
                         command.extend(["--camera", "--camera-unit", str(args.camera_unit)])
                     if args.save_snapshots is not None:
                         command.extend(["--save-snapshots", str(args.save_snapshots)])
+                    command.append("--calls" if args.calls else "--no-calls")
                     command.extend(shopping_arguments(args))
                 print("Speaker stream ready. Starting test… Ctrl+C stops everything.", flush=True)
                 app = subprocess.Popen(
@@ -314,6 +315,7 @@ def launch(args):
             command.extend(["--save-snapshots", str(args.save_snapshots.expanduser().resolve())])
         if args.tone:
             command.append("--tone")
+        command.append("--calls" if args.calls else "--no-calls")
         shopping = shopping_arguments(args)
         command.extend(shopping)
         if "--shopify" not in shopping:

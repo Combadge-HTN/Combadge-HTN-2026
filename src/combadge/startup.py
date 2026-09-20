@@ -1,4 +1,4 @@
-"""Convenient microphone/camera startup with transcript-only local output."""
+"""Start microphone, camera, Bluetooth replies, and human calling."""
 
 from argparse import BooleanOptionalAction
 from pathlib import Path
@@ -40,7 +40,16 @@ def add_arguments(parser):
         help="keep captured images in this directory",
     )
     parser.add_argument(
-        "--bluetooth", action="store_true", help="play through Dan's Bluetooth example"
+        "--bluetooth",
+        action=BooleanOptionalAction,
+        default=True,
+        help="play through the Bluetooth speaker (default: enabled)",
+    )
+    parser.add_argument(
+        "--calls",
+        action=BooleanOptionalAction,
+        default=True,
+        help="enable human phone calls (default: enabled; requires configured contacts)",
     )
     parser.add_argument("--bluetooth-dir", type=Path, default=ROOT.parent / "qnx-bluetooth")
     parser.add_argument(
@@ -89,6 +98,7 @@ def launch(args):
         command.extend(["--camera", "--camera-unit", str(args.camera_unit)])
     if args.save_snapshots is not None:
         command.extend(["--save-snapshots", str(args.save_snapshots.expanduser().resolve())])
+    command.append("--calls" if args.calls else "--no-calls")
     command.extend(shopping_arguments(args))
     print(
         "Starting microphone and camera; replies appear in this console. Ctrl+C stops.", flush=True
