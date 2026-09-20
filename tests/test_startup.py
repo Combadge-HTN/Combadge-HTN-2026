@@ -438,3 +438,30 @@ def test_privileged_entry_point_loads_defaults_and_honors_opt_out(tmp_path, monk
         ):
             assert bluetooth_startup.main() == 0
         assert run.call_args.args[0].speaker == speakers
+
+
+def test_local_backend_overrides_speechmatics_and_survives_start_forwarding(tmp_path, monkeypatch):
+    from combadge.local_speakers import LocalSpeakerInput
+
+    env, _ = saved_speakers(tmp_path, monkeypatch)
+    with patch("combadge.live.connect_voice") as connect:
+        assert (
+            main(
+                [
+                    "start",
+                    "--no-bluetooth",
+                    "--no-calls",
+                    "--no-camera",
+                    "--no-shopify",
+                    "--env-file",
+                    str(env),
+                    "--speaker-backend",
+                    "local",
+                ]
+            )
+            == 0
+        )
+    source = connect.call_args.kwargs["speaker_input"]
+    assert isinstance(source, LocalSpeakerInput)
+    assert connect.call_args.kwargs["speaker_tracker"] is None
+    assert source.worker.model == tmp_path / "models/campplus.onnx"

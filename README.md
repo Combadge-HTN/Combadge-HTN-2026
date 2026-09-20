@@ -157,6 +157,8 @@ Press **Ctrl+C** to end the session. Sessions default to five minutes; use `--ma
 
 Add `--speaker Edmon=/path/to/edmon.wav --speaker Samuel=/path/to/samuel.wav` to identify enrolled voices alongside the live conversation. This uses the existing voice installation. Labels arrive asynchronously and can be wrong; overlapping speech remains experimental. See [speaker setup and limitations](docs/SPEAKERS.md).
 
+For on-device CAM++ matching with QNX ONNX Runtime, see [local speaker setup](docs/local-speakers.md). Select it with `--speaker-backend local` after building the native worker.
+
 ### Custom speech voices
 
 `OPENAI_LIVE_VOICE` selects the voice at the start of every GPT-Live session.
