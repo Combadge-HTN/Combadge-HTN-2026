@@ -22,6 +22,9 @@ class Settings:
     composio_user_id: str = field(default="", repr=False)
     composio_accounts: dict[str, str] = field(default_factory=dict, repr=False)
     speaker_references: str = field(default="", repr=False)
+    speaker_backend: str = "auto"
+    speaker_worker: str = "build/speaker/speaker-worker"
+    speaker_model: str = "models/campplus.onnx"
     echo_mode: str = "off"
     echo_delay_ms: str = ""
     echo_library: str = ""
@@ -55,6 +58,9 @@ def load_settings(env_file: Path = Path(".env")) -> Settings:
             if (account := value(f"COMPOSIO_{app.upper()}_ACCOUNT_ID"))
         },
         speaker_references=value("COMBADGE_SPEAKERS"),
+        speaker_backend=value("COMBADGE_SPEAKER_BACKEND") or "auto",
+        speaker_worker=value("COMBADGE_SPEAKER_WORKER") or "build/speaker/speaker-worker",
+        speaker_model=value("COMBADGE_SPEAKER_MODEL") or "models/campplus.onnx",
         echo_mode=value("COMBADGE_AEC") or "off",
         echo_delay_ms=value("COMBADGE_AEC_DELAY_MS"),
         echo_library=value("COMBADGE_AEC_LIBRARY"),

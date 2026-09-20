@@ -10,7 +10,8 @@ RESUME_INSTRUCTIONS = (
     "for continuity. Do not repeat, retry, or finish old actions automatically, including "
     "texts, emails, calendar changes or calls. Wait for a new user request before acting. "
     "Tool results take precedence over earlier conversational claims. If a human phone call "
-    "occurred, you did not hear or record it; never invent what was said. Some older context may be "
+    "occurred, you did not hear or record it; never invent what was said. "
+    "Some older context may be "
     "omitted. Ask if needed rather than guessing."
 )
 

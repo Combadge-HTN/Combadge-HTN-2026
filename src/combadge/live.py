@@ -119,6 +119,7 @@ def session_config(
     shop_account: bool = False,
     speakers: bool = False,
     attributed_speakers: bool = False,
+    attribution_instructions: str | None = None,
     web: bool = False,
     composio: bool = False,
     sms_names: list[str] | None = None,
@@ -128,7 +129,7 @@ def session_config(
         "model": settings.live_model,
         "instructions": PROMPT
         + (SPEAKER_INSTRUCTIONS if speakers else "")
-        + (INPUT_INSTRUCTIONS if attributed_speakers else "")
+        + ((attribution_instructions or INPUT_INSTRUCTIONS) if attributed_speakers else "")
         + (
             " The application is submitting a still image and question to your backend. "
             "The initial question is already being processed; do not start another delegation. "
@@ -717,6 +718,7 @@ async def run_session(
                         shop_account=getattr(shopping, "account", None) is not None,
                         speakers=speaker_tracker is not None,
                         attributed_speakers=speaker_input is not None,
+                        attribution_instructions=getattr(speaker_input, "instructions", None),
                         resume_context=resume_context,
                     ),
                 }

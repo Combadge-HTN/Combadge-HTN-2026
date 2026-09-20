@@ -1,0 +1,16 @@
+diff --git a/cmake/onnxruntime_providers_cpu.cmake b/cmake/onnxruntime_providers_cpu.cmake
+--- a/cmake/onnxruntime_providers_cpu.cmake
++++ b/cmake/onnxruntime_providers_cpu.cmake
+@@ -60,6 +60,12 @@ if(NOT onnxruntime_DISABLE_CONTRIB_OPS)
+   # add using ONNXRUNTIME_ROOT so they show up under the 'contrib_ops' folder in Visual Studio
+   source_group(TREE ${ONNXRUNTIME_ROOT} FILES ${onnxruntime_cpu_contrib_ops_srcs})
+   list(APPEND onnxruntime_providers_src ${onnxruntime_cpu_contrib_ops_srcs})
++else()
++  # ARM's standard FP16 Conv kernel also uses this helper. Keep it linked
++  # when contrib operator registrations are disabled.
++  list(APPEND onnxruntime_providers_src
++    "${ONNXRUNTIME_ROOT}/contrib_ops/cpu/fused_activation.cc"
++  )
+ endif()
+ 
+ if (onnxruntime_ENABLE_TRAINING_OPS AND NOT onnxruntime_ENABLE_TRAINING)

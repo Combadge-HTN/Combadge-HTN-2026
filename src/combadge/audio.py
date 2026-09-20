@@ -4,8 +4,8 @@ import asyncio
 import errno
 import os
 import queue
-import stat
 import shutil
+import stat
 import subprocess
 import sys
 from contextlib import suppress

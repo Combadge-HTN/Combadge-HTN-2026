@@ -30,3 +30,7 @@ build/
 *.egg-info/
 .coverage
 htmlcov/
+
+# Local model weights and identity artifacts
+models/
+:memory:.ses

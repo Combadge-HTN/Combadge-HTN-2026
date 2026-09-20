@@ -27,6 +27,7 @@ def test_fifo_cue_preserves_samples_with_partial_writes(monkeypatch):
     import stat
     from importlib.resources import files
     from types import SimpleNamespace
+
     from combadge.audio import play_fifo_cue
 
     output = bytearray()
@@ -40,7 +41,9 @@ def test_fifo_cue_preserves_samples_with_partial_writes(monkeypatch):
 
     async def scenario():
         monkeypatch.setattr("combadge.audio.os.open", lambda *args: 12345)
-        monkeypatch.setattr("combadge.audio.os.fstat", lambda _: SimpleNamespace(st_mode=stat.S_IFIFO))
+        monkeypatch.setattr(
+            "combadge.audio.os.fstat", lambda _: SimpleNamespace(st_mode=stat.S_IFIFO)
+        )
         monkeypatch.setattr("combadge.audio.os.write", write)
         monkeypatch.setattr("combadge.audio.os.close", closed.append)
         await play_fifo_cue("unused")

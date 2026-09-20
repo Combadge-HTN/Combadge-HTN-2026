@@ -110,6 +110,8 @@ def main(argv: list[str] | None = None) -> int:
     analyze.add_argument("audio", type=Path, help="mono PCM16 24kHz WAV, up to 30 seconds")
     analyze.add_argument("--speaker", action="append", required=True, metavar="NAME=FILE.wav")
     analyze.add_argument("--env-file", type=Path, default=Path(".env"))
+    for speaker_parser in (voice, analyze):
+        speaker_parser.add_argument("--speaker-backend", choices=("auto", "local"), default=None)
     voice.add_argument("--image", type=Path, help="send a JPEG, PNG, or WebP to the vision backend")
     voice.add_argument("--question", help="question about --image (default: describe the image)")
     snapshots = voice.add_mutually_exclusive_group()
@@ -393,7 +395,28 @@ def main(argv: list[str] | None = None) -> int:
     except OSError:
         parser.exit(1, "Could not read the selected environment file. Check its permissions.\n")
 
+    local_speakers = False
     if args.command in ("voice", "speakers") and args.speaker:
+        backend = args.speaker_backend or settings.speaker_backend
+        if backend not in ("auto", "local"):
+            parser.error("COMBADGE_SPEAKER_BACKEND must be auto or local")
+        local_speakers = backend == "local"
+        if local_speakers:
+            from combadge.local_speakers import LocalSpeakerInput, Worker, analyze_file
+
+            base = args.env_file.expanduser().resolve().parent
+            worker = Worker(base / settings.speaker_worker, base / settings.speaker_model)
+            if args.command == "voice":
+                speaker_input = LocalSpeakerInput(worker, references)
+            else:
+                try:
+                    result = asyncio.run(analyze_file(worker, references, args.audio))
+                    print(json.dumps(result, indent=2))
+                    return 0
+                except (OSError, ValueError, RuntimeError, TimeoutError, EOFError) as error:
+                    parser.exit(1, f"Local speaker analysis failed: {error}\n")
+
+    if args.command in ("voice", "speakers") and args.speaker and not local_speakers:
         if not settings.openai_api_key:
             parser.exit(1, "Add OPENAI_API_KEY before using speaker identification.\n")
         transcriber = Transcriber(settings.openai_api_key, references)
@@ -430,7 +453,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "voice":
         if args.speaker:
-            backend = "Speechmatics streaming" if speaker_input is not None else "OpenAI background"
+            backend = (
+                "Local CAM++"
+                if local_speakers
+                else "Speechmatics streaming"
+                if speaker_input is not None
+                else "OpenAI background"
+            )
             names = ", ".join(reference.name for reference in references)
             print(f"Speaker identification: {backend} configured for {names}.", flush=True)
         else:
@@ -632,7 +661,9 @@ def main(argv: list[str] | None = None) -> int:
                         if args.cue_fifo:
                             await play_fifo_cue(args.cue_fifo)
                         elif voice_options["playback_command"]:
-                            await play_local_cue(voice_options["playback_command"], activation_chirp())
+                            await play_local_cue(
+                                voice_options["playback_command"], activation_chirp()
+                            )
 
                     async def session(stop, continuity, context, cue):
                         if args.cue_fifo or voice_options["playback_command"]:

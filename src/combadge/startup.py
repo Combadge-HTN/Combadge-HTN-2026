@@ -21,6 +21,7 @@ def add_arguments(parser):
 
     parser.add_argument("--env-file", type=Path, default=ROOT / ".env")
     parser.add_argument("--input-device", default="default")
+    parser.add_argument("--speaker-backend", choices=("auto", "local"), default=None)
     speakers = parser.add_mutually_exclusive_group()
     speakers.add_argument(
         "--speaker",
@@ -106,7 +107,10 @@ def shopping_arguments(args):
 
 
 def speaker_arguments(args):
-    return [item for reference in args.speaker for item in ("--speaker", reference)]
+    command = [item for reference in args.speaker for item in ("--speaker", reference)]
+    if backend := getattr(args, "speaker_backend", None):
+        command.extend(["--speaker-backend", backend])
+    return command
 
 
 def touch_arguments(args):
