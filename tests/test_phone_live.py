@@ -191,6 +191,8 @@ def test_voice_disconnects_before_dialing_and_reconnects_only_after_call_ends(
             return ["alex"]
 
         async def phone(settings, contact, audio, **kwargs):
+            assert kwargs["start_audio"] is True
+            await audio.start()
             assert sequence[-2:] == ["openai-closed", "audio-start"]
             assert connection.closed and not audio.closed
             assert contact == "alex"
@@ -283,3 +285,33 @@ def test_stop_during_phone_call_waits_for_hangup_then_closes_audio(monkeypatch):
         assert hung_up.is_set() and audio.closed
 
     asyncio.run(scenario())
+
+
+def test_voice_sip_failure_is_reported_without_token_attribute_error(tmp_path, monkeypatch, capsys):
+    from unittest.mock import AsyncMock
+
+    from combadge import live
+    from combadge.cli import main
+
+    env = tmp_path / ".env"
+    env.write_text("OPENAI_API_KEY=test-openai-key\n")
+    config = SipSettings(
+        "test.pstn.twilio.com",
+        "badge",
+        "private-sip-password",
+        "+14165550100",
+        {"edmon": "+14165550101"},
+    )
+    monkeypatch.setattr(PhoneSettings, "load", lambda *a, **kw: config)
+    monkeypatch.setattr(
+        live,
+        "connect_voice",
+        AsyncMock(side_effect=RuntimeError("Microphone failed private-sip-password")),
+    )
+    with pytest.raises(SystemExit) as error:
+        main(["voice", "--calls", "--env-file", str(env)])
+    assert error.value.code == 1
+    output = capsys.readouterr().err
+    assert "Voice failed: Microphone failed [REDACTED]" in output
+    assert "private-sip-password" not in output
+    assert "AttributeError" not in output

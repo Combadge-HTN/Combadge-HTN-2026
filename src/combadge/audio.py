@@ -66,6 +66,7 @@ class CommandAudio:
 
     async def start(self) -> None:
         self.preflight()
+        self._logs.clear()
         try:
             if self.playback_command is not None:
                 self.player = subprocess.Popen(

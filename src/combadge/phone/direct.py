@@ -373,7 +373,7 @@ class SipCall:
                 await asyncio.wait_for(self.writer.wait_closed(), 1)
 
 
-async def call_contact(settings, contact, audio, *, seconds=300, report=print):
+async def call_contact(settings, contact, audio, *, seconds=300, report=print, start_audio=False):
     contact = contact.casefold()
     if contact not in settings.contacts:
         raise ValueError("Unknown contact; configure CALL_CONTACTS")
@@ -386,6 +386,10 @@ async def call_contact(settings, contact, audio, *, seconds=300, report=print):
     try:
         await call.open()
         if await call.invite():
+            # Capture must not run unread while the phone rings: QNX devices
+            # can overrun and exit before the first media frame is consumed.
+            if start_audio:
+                await audio.start()
             tasks = [
                 asyncio.create_task(call.signaling()),
                 asyncio.create_task(call.media_loop(audio)),
