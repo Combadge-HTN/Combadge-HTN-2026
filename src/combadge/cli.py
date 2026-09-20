@@ -397,6 +397,14 @@ def main(argv: list[str] | None = None) -> int:
                     1, "Speaker analysis failed; check WAV format, API access and connection.\n"
                 )
 
+    if args.command == "voice":
+        if args.speaker:
+            backend = "Speechmatics streaming" if speaker_input is not None else "OpenAI background"
+            names = ", ".join(reference.name for reference in references)
+            print(f"Speaker identification: {backend} configured for {names}.", flush=True)
+        else:
+            print("Speaker identification: off (no speaker references).", flush=True)
+
     if args.command == "composio":
         if args.action == "tools" and not args.app:
             parser.error("composio tools requires --app")

@@ -692,6 +692,7 @@ async def run_session(
         if speaker_input is not None:
             report("\nPreparing streaming speaker identification…\n")
             await speaker_input.start()
+            report("Streaming speaker identification ready.\n")
         await audio.start()
         report(
             "\nGPT-Live connected. "

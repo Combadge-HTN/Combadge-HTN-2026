@@ -62,3 +62,12 @@ def test_speechmatics_credential_is_loaded_privately(tmp_path):
         settings = load_settings(path)
         assert settings.speechmatics_api_key == "speaker-private-value"
         assert "speaker-private-value" not in repr(settings)
+
+
+def test_saved_speakers_follow_selected_file_and_environment_precedence(tmp_path, monkeypatch):
+    monkeypatch.delenv("COMBADGE_SPEAKERS", raising=False)
+    path = tmp_path / ".env"
+    path.write_text('COMBADGE_SPEAKERS=\'{"Edmon":"recordings/edmon.wav"}\'\n')
+    assert load_settings(path).speaker_references == '{"Edmon":"recordings/edmon.wav"}'
+    monkeypatch.setenv("COMBADGE_SPEAKERS", "{}")
+    assert load_settings(path).speaker_references == "{}"

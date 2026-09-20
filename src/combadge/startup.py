@@ -1,5 +1,7 @@
 """Start microphone, camera, Bluetooth replies, and human calling."""
 
+import json
+import sys
 from argparse import ArgumentTypeError, BooleanOptionalAction
 from pathlib import Path
 
@@ -19,13 +21,17 @@ def add_arguments(parser):
 
     parser.add_argument("--env-file", type=Path, default=ROOT / ".env")
     parser.add_argument("--input-device", default="default")
-    parser.add_argument(
+    speakers = parser.add_mutually_exclusive_group()
+    speakers.add_argument(
         "--speaker",
         action="append",
         type=speaker_reference,
         default=[],
         metavar="NAME=FILE.wav",
-        help="enable speaker identification with a 2–10s reference; repeat for up to four people",
+        help="override configured speakers with a 2–10s reference; repeat for up to four people",
+    )
+    speakers.add_argument(
+        "--no-speakers", action="store_true", help="disable configured speaker identification"
     )
     camera_unit = next((unit for unit in (3, 4) if Path(f"/dev/sensor/camera{unit}").exists()), 4)
     parser.add_argument("--camera-unit", type=int, default=camera_unit)
@@ -95,7 +101,45 @@ def speaker_arguments(args):
     return [item for reference in args.speaker for item in ("--speaker", reference)]
 
 
+def configured_speakers(args):
+    """Resolve saved references relative to the selected env file, before sudo."""
+    from combadge.config import load_settings
+    from combadge.speakers import load_references
+
+    references = args.speaker
+    if args.no_speakers:
+        return []
+    if not references and not args.tone:
+        saved = load_settings(args.env_file).speaker_references
+        if saved:
+            try:
+                mapping = json.loads(saved)
+            except json.JSONDecodeError:
+                raise ValueError(
+                    "COMBADGE_SPEAKERS must be a JSON name-to-WAV-path object"
+                ) from None
+            if not isinstance(mapping, dict) or any(
+                not name or not isinstance(path, str) or not path for name, path in mapping.items()
+            ):
+                raise ValueError("COMBADGE_SPEAKERS must map speaker names to nonempty WAV paths")
+            base = args.env_file.expanduser().resolve().parent
+            references = [
+                f"{name}={(base / Path(path).expanduser()).resolve()}"
+                for name, path in mapping.items()
+            ]
+    if references:
+        if args.tone:
+            raise ValueError("--speaker requires a voice session, not --tone")
+        load_references(references)
+    return references
+
+
 def launch(args):
+    try:
+        args.speaker = configured_speakers(args)
+    except (OSError, ValueError) as error:
+        print(f"Cannot load speaker references: {error}", file=sys.stderr)
+        return 2
     if args.bluetooth or args.tone:
         from combadge.bluetooth_startup import launch as bluetooth
 
