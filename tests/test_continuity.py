@@ -81,7 +81,7 @@ def test_context_is_bounded_and_discards_older_history():
 
 
 @pytest.mark.parametrize("backend", ["commands", "console", "alsa", "mac"])
-def test_reconnect_preserves_audio_and_tools_but_resets_speaker_offsets(monkeypatch, backend):
+def test_call_returns_without_reopening_audio_tools_or_speaker_tracker(monkeypatch, backend):
     import websockets.asyncio.client
 
     from combadge import live
@@ -136,28 +136,17 @@ def test_reconnect_preserves_audio_and_tools_but_resets_speaker_offsets(monkeypa
             **commands,
             **features,
         )
-        assert caller.await_count == 1 and session.await_count == 2
-        first, second = session.call_args_list
-        assert first.args[1] is not second.args[1]
-        assert audio_factory.call_count == 2
-        assert audio_factory.call_args_list[0] == audio_factory.call_args_list[1]
-        if backend == "console":
-            audio_factory.assert_called_with("mic", "speaker", playback=False)
-        elif backend == "commands":
-            audio_factory.assert_called_with(["capture-helper"], ["playback-helper"])
+        assert caller.await_count == 1 and session.await_count == 1
+        assert audio_factory.call_count == 1
+        first = session.call_args
         for name, value in features.items():
-            assert first.kwargs[name] is value and second.kwargs[name] is value
-        resumed_tracker = second.kwargs["speaker_tracker"]
+            assert first.kwargs[name] is value
         assert first.kwargs["speaker_tracker"] is tracker
-        assert resumed_tracker.transcriber is tracker.transcriber
-        assert resumed_tracker.total_bytes == 0 and not resumed_tracker.buffer
-        assert resumed_tracker.pending.empty() and not resumed_tracker.awaiting
-        assert "completed" in second.kwargs["resume_context"]
 
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("mode", ["stop", "none", "unconfirmed", "raises", "reconnect-fails"])
+@pytest.mark.parametrize("mode", ["stop", "none", "unconfirmed", "raises", "completed"])
 def test_call_stop_or_uncertain_teardown_never_redials_or_reopens_voice(monkeypatch, mode):
     async def scenario():
         import websockets.asyncio.client
@@ -216,12 +205,9 @@ def test_call_stop_or_uncertain_teardown_never_redials_or_reopens_voice(monkeypa
         if mode in ("unconfirmed", "raises"):
             with pytest.raises(RuntimeError, match="unconfirmed"):
                 await session
-        elif mode == "reconnect-fails":
-            with pytest.raises(ConnectionError, match="Reconnect failed"):
-                await session
         else:
             await session
-        assert len(opened) == (2 if mode == "reconnect-fails" else 1)
+        assert len(opened) == 1
         assert caller.await_count == 1
 
     asyncio.run(scenario())

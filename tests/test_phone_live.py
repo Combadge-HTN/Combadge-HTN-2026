@@ -130,8 +130,10 @@ def test_call_request_completes_tool_exchange_before_finalizing_live(
 
 @pytest.mark.parametrize("acknowledge_close", [True, False])
 @pytest.mark.parametrize("transport", ["relay", "sip"])
-@pytest.mark.parametrize("outcome", ["completed", "no-answer", "busy"])
-def test_voice_disconnects_before_dialing_and_reconnects_only_after_call_ends(
+@pytest.mark.parametrize(
+    "outcome", ["completed", "no-answer", "busy", "failed", "canceled", "ended"]
+)
+def test_voice_disconnects_before_dialing_and_stays_off_after_call_ends(
     monkeypatch, acknowledge_close, transport, outcome
 ):
     async def scenario():
@@ -234,16 +236,8 @@ def test_voice_disconnects_before_dialing_and_reconnects_only_after_call_ends(
             return
         stats = await session
         assert stats.finalized
-        assert stats.phone_contact is None  # Previous call cannot trigger a second dial.
-        resume_config = resumed.messages[0]["session"]
-        context = resume_config["input"][0]["content"][0]["text"]
-        assert outcome in context and "alex" in context
-        assert "Do not repeat" in resume_config["instructions"]
-        assert any(
-            message["type"] == "session.instructions.append"
-            and "Computer is back" in message["content"]
-            for message in resumed.messages
-        )
+        assert stats.phone_contact == "alex"
+        assert len(opened) == 1  # A new session requires a new explicit activation.
         assert sequence == [
             "openai-open",
             "audio-start",
@@ -252,10 +246,6 @@ def test_voice_disconnects_before_dialing_and_reconnects_only_after_call_ends(
             "audio-start",
             "phone-call",
             "audio-close",
-            "openai-open",
-            "audio-start",
-            "audio-close",
-            "openai-closed",
         ]
 
     asyncio.run(scenario())

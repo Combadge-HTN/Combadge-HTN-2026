@@ -32,6 +32,7 @@ def test_handoff_keeps_receiving_farewell_then_drains_before_close(monkeypatch):
 
     async def scenario():
         order = []
+        reports = []
         tail = b"\x00\x10" * 480
 
         class Connection(FakeConnection):
@@ -77,9 +78,10 @@ def test_handoff_keeps_receiving_farewell_then_drains_before_close(monkeypatch):
             stop,
             phone_settings=config,
             seconds=1,
-            report=lambda _: None,
+            report=reports.append,
         )
         assert result.phone_contact == "alex"
+        assert any("Call request accepted: alex" in line for line in reports)
         assert audio.output == [tail]
         assert order == ["drain", "audio-close", "session-close"]
         assert connection.input[0] != bytes(960)
