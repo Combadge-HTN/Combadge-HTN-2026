@@ -61,6 +61,10 @@ class SpeexEcho:
 class EchoReference:
     """Bound speaker history and align it using a calibrated end-to-end delay.
 
+    Anchor each continuous stream once, then advance by samples. Thread wakeups
+    are not hardware sample timestamps: using each read's wall time would skip
+    or repeat the reference whenever capture arrives in bursts.
+
     Pipe submission times approximate render times. They do not expose A2DP's
     hardware clock; changing speaker buffering can invalidate the calibration.
     """
@@ -72,10 +76,13 @@ class EchoReference:
         self.clock = clock
         self.history = deque()
         self.end = 0.0
+        self.capture_end = None
 
     def playback(self, data):
         now = self.clock()
-        start = max(now, self.end)
+        # A late write can still reach the buffered speaker before its playback
+        # deadline. Preserve sample continuity until the estimated buffer drains.
+        start = self.end if self.history and now <= self.end + self.delay else now
         self.end = start + len(data) / (RATE * 2)
         self.history.append((start, data))
         while self.history and self.history[0][0] < now - 2:
@@ -85,7 +92,10 @@ class EchoReference:
             self.history.popleft()
 
     def capture_reference(self):
-        start = self.clock() - 0.02 - self.delay
+        if self.capture_end is None:
+            self.capture_end = self.clock()
+        start = self.capture_end - 0.02 - self.delay
+        self.capture_end += FRAME_BYTES / (RATE * 2)
         output = bytearray(FRAME_BYTES)
         for render_start, data in self.history:
             offset = round((render_start - start) * RATE)
@@ -106,7 +116,13 @@ def configured_echo(settings=None):
     delay = settings.echo_delay_ms if settings else os.environ.get("COMBADGE_AEC_DELAY_MS")
     if not delay:
         raise ValueError("Set COMBADGE_AEC_DELAY_MS to the measured speaker-to-capture delay")
-    reference = EchoReference(float(delay))
+    measured_delay = float(delay)
+    if not math.isfinite(measured_delay) or not 0 <= measured_delay <= 1000:
+        raise ValueError("COMBADGE_AEC_DELAY_MS must be between 0 and 1000")
+    # Speex uses a causal 200 ms filter: the relevant playback samples must be
+    # present before their echo, not delivered just after it. Leave 50 ms for
+    # residual path delay and uncertainty in pipe/capture timestamp calibration.
+    reference = EchoReference(max(0, measured_delay - 50))
     library = settings.echo_library if settings else os.environ.get("COMBADGE_AEC_LIBRARY")
     processor = SpeexEcho(library or None)
     return processor, reference
