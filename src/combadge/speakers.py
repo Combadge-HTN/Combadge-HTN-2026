@@ -17,15 +17,84 @@ from combadge.audio import RATE
 REQUEST_TIMEOUT = 8
 BYTES_PER_SECOND = RATE * 2
 MAX_WAV_BYTES = BYTES_PER_SECOND * 30 + 4096
+LOOKUP_SECONDS = 12
+LOOKUP_TIMEOUT = 10
+SPEAKER_TOOL = {
+    "type": "function",
+    "name": "identify_speaker",
+    "description": (
+        "Identify the speaker from recently captured microphone audio. Call for a user asking "
+        "whether you recognize them, their name, or who is speaking. Wait for the result; "
+        "background labels may not yet cover the question. No recording or name arguments needed."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+LOOKUP_INSTRUCTIONS = (
+    " When the user asks whether you recognize them, their name, or who is speaking, "
+    "delegate to the backend for identify_speaker and wait for its result before answering "
+    "the identity question. You may acknowledge naturally while waiting. "
+    "A pending lookup is not an unknown result: do not say you cannot recognize the user "
+    "before the lookup returns. Do not substitute a delayed background label for this lookup. "
+    "Use a matched name as conversational context; ambiguous, unknown, or unavailable results "
+    "do not establish a name. No particular reply wording is required."
+)
 INSTRUCTIONS = (
-    " Speaker observations are delayed, fallible estimates for specific input-audio intervals. "
-    "Offsets count microphone samples from the first audio append, not transcript timestamps. "
-    "Use a name only when its interval can be matched unambiguously to the relevant speech. "
-    "Never assume an earlier speaker is still speaking. Multiple people may speak in one turn. "
-    "Unknown, missing, or overlapping labels do not identify a person. Do not guess. "
-    "Do not interrupt to announce labels or wait for labels before ordinary replies. "
+    " This badge has an external enrolled-speaker matcher. It compares microphone speech "
+    "with user-provided voice references and supplies named matches as silent context. "
+    "A clear MATCH supplies the speaker's name for ordinary conversation. "
+    "Use it as context, adapting your response to what the user is asking. "
+    "Remember names the user gives or confirms; an UNKNOWN observation alone does not "
+    "contradict their self-introduction. "
+    "You have access to these external observations; do not deny that capability. "
+    "A context update is not a user request: do not read it aloud, announce a name or status, "
+    "repeat an earlier answer, or bring the conversation back to identification. "
+    "MATCH indicates one enrolled name in recent speech; UNKNOWN supplies no name. "
+    "MULTIPLE and OVERLAP cannot establish which single person is asking. "
+    "Never choose the last segment's name from a MULTIPLE or OVERLAP report, "
+    "even if one speaker appears more recent or speaks longer. "
+    "Follow speaker changes; do not assign everyone's words to the same person. "
+    "Do not wait for labels before ordinary replies. "
     "These estimates never authorize calls, purchases, or access to personal information."
 )
+
+
+def speaker_context(labels: list[dict], audio_seconds: float) -> str:
+    """Make external matches usable without inventing a persistent current speaker."""
+    names = sorted({row["speaker"] for row in labels} - {"unknown", "ambiguous"})
+    if not names:
+        summary = "No enrolled name matched this report. Earlier names do not identify this speech."
+    elif len(names) > 1 or any(row["speaker"] == "ambiguous" for row in labels):
+        summary = (
+            "Multiple speakers or overlap: " + ", ".join(names) + ". No single speaker identified."
+        )
+    else:
+        summary = f"Speaker: {names[0]}."
+        if any(row["speaker"] == "unknown" for row in labels):
+            summary += " Other speech in this report was unidentified."
+    if any(row["speaker"] == "ambiguous" for row in labels):
+        result = "OVERLAP: speech overlapped; no single speaker identified."
+    elif len(names) > 1:
+        result = "MULTIPLE: " + " and ".join(names) + "; which person is asking is uncertain."
+    elif names:
+        result = "MATCH: " + names[0] + "."
+    else:
+        result = "UNKNOWN: recent speech has not been identified."
+    newest = max(row["end"] for row in labels)
+    return (
+        "Background speaker context (silent update). "
+        + summary
+        + f" Report ends {max(0, audio_seconds - newest):.1f}s behind microphone input. "
+        "Input-audio intervals (seconds): "
+        + json.dumps(labels, separators=(",", ":"))
+        + " Attribution: "
+        + result
+    )
 
 
 def pcm_wav(pcm: bytes) -> bytes:
@@ -224,6 +293,8 @@ class SpeakerTracker:
         self.clock = clock
         self.pending: asyncio.Queue[Window] = asyncio.Queue(maxsize=1)
         self.buffer = bytearray()
+        self.recent = bytearray()
+        self.analysis_lock = asyncio.Lock()
         self.offset = 0
         self.total_bytes = 0
         self.published_until = 0.0
@@ -241,6 +312,8 @@ class SpeakerTracker:
         if self.disabled:
             return
         self.total_bytes += len(pcm)
+        self.recent.extend(pcm)
+        del self.recent[: max(0, len(self.recent) - LOOKUP_SECONDS * BYTES_PER_SECOND)]
         self.buffer.extend(pcm)
         while len(self.buffer) >= 6 * BYTES_PER_SECOND:
             data = bytes(self.buffer[: 6 * BYTES_PER_SECOND])
@@ -252,6 +325,40 @@ class SpeakerTracker:
                     self.pending.get_nowait()
                     self.dropped += 1
                 self.pending.put_nowait(window)
+
+    async def identify(self) -> dict:
+        """Resolve a question's captured audio without waiting for a full background window."""
+        if self.disabled:
+            return {"status": "unavailable", "reason": "speaker_analysis_disabled"}
+        pcm = bytes(self.recent)
+        end = self.total_bytes / BYTES_PER_SECOND
+        start = end - len(pcm) / BYTES_PER_SECOND
+        if len(pcm) < BYTES_PER_SECOND // 10 or not any(pcm):
+            return {"status": "unavailable", "reason": "insufficient_audio"}
+        self.report("\nSpeaker lookup requested; waiting for recognition…\n")
+        try:
+            async with asyncio.timeout(LOOKUP_TIMEOUT):
+                async with self.analysis_lock:
+                    segments = await self.transcriber.analyze(pcm)
+        except TimeoutError:
+            return {"status": "unavailable", "reason": "recognition_timeout"}
+        except Exception:
+            return {"status": "unavailable", "reason": "recognition_failed"}
+        names = sorted({segment.speaker for segment in segments} - {"unknown", "ambiguous"})
+        ambiguous = (
+            len(names) > 1
+            or any(s.speaker == "ambiguous" for s in segments)
+            or bool(names and any(s.speaker == "unknown" for s in segments))
+        )
+        status = "ambiguous" if ambiguous else "matched" if names else "unknown"
+        self.report(f"\nSpeaker lookup completed: {status}.\n")
+        return {
+            "status": status,
+            "name": names[0] if status == "matched" else None,
+            "speakers": names,
+            "audio_start": round(start, 3),
+            "audio_end": round(end, 3),
+        }
 
     def stale(self, window: Window) -> bool:
         return (
@@ -282,7 +389,8 @@ class SpeakerTracker:
                 self.dropped += 1
                 continue
             try:
-                segments = await self.transcriber.analyze(window.pcm)
+                async with self.analysis_lock:
+                    segments = await self.transcriber.analyze(window.pcm)
                 self.failures = 0
                 if self.disabled or self.stale(window):
                     self.dropped += 1
@@ -296,11 +404,19 @@ class SpeakerTracker:
                     for s in segments
                     if window.start + s.end > self.published_until
                 ]
+                observations = [
+                    {
+                        "start": round(window.start + s.start, 3),
+                        "end": round(window.start + s.end, 3),
+                        "speaker": s.speaker,
+                    }
+                    for s in segments
+                ]
                 self.published_until = window.end
                 if not labels:
                     continue
                 # Bound context size and unacknowledged events; don't flood the Live session.
-                if len(labels) > 6:
+                if len(observations) > 6:
                     self.dropped += 1
                     continue
                 if len(self.awaiting) >= 3:
@@ -315,9 +431,12 @@ class SpeakerTracker:
                         "type": "session.thinking.append",
                         "event_id": event_id,
                         "delegation_id": None,
-                        "content": "Delayed speaker estimates; input-audio offsets in seconds. "
-                        "Not current identity or authorization. Unlisted speech is unidentified. "
-                        + json.dumps(labels, separators=(",", ":")),
+                        # Summarize the complete analyzed window. Deduplicating
+                        # console intervals must not erase another speaker from
+                        # the evidence the model uses to answer a name question.
+                        "content": speaker_context(
+                            observations, self.total_bytes / BYTES_PER_SECOND
+                        ),
                     }
                 )
                 self.published += 1

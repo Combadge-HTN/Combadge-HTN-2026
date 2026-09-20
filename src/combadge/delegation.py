@@ -54,10 +54,12 @@ class SnapshotDelegation:
         composio: ComposioClient | None = None,
         sms: SmsClient | None = None,
         call_handler=None,
+        speaker_handler=None,
         on_tools_submitted: Callable[[], None] | None = None,
         on_tool_result: Callable[[str, str, dict], None] | None = None,
     ):
         self.call_handler = call_handler
+        self.speaker_handler = speaker_handler
         self.on_tools_submitted = on_tools_submitted
         self.on_tool_result = on_tool_result
         self.connection = connection
@@ -109,7 +111,11 @@ class SnapshotDelegation:
                     args = json.loads(call.arguments)
                     if not isinstance(args, dict):
                         raise ValueError("Tool arguments must be an object.")
-                    if call.name == "call_contact" and self.call_handler is not None:
+                    if call.name == "identify_speaker" and self.speaker_handler is not None:
+                        if args:
+                            raise ValueError("identify_speaker takes no arguments")
+                        result = await self.speaker_handler()
+                    elif call.name == "call_contact" and self.call_handler is not None:
                         if set(args) != {"contact"} or not isinstance(args["contact"], str):
                             raise ValueError("Expected exactly one contact name")
                         result = await self.call_handler(args["contact"])

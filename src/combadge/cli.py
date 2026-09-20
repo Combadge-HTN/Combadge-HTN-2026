@@ -194,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in ("call", "phone-relay"):
         return run_phone(args, parser)
     speaker_tracker = None
+    speaker_input = None
     if args.command in ("voice", "speakers") and args.speaker:
         if args.command == "voice" and (args.check or args.list_devices):
             parser.error("--speaker requires a voice session")
@@ -365,7 +366,12 @@ def main(argv: list[str] | None = None) -> int:
         if not settings.openai_api_key:
             parser.exit(1, "Add OPENAI_API_KEY before using speaker identification.\n")
         transcriber = Transcriber(settings.openai_api_key, references)
-        speaker_tracker = SpeakerTracker(transcriber)
+        if args.command == "voice" and settings.speechmatics_api_key:
+            from combadge.speechmatics import StreamingSpeakerInput
+
+            speaker_input = StreamingSpeakerInput(settings.speechmatics_api_key, references)
+        else:
+            speaker_tracker = SpeakerTracker(transcriber)
         if args.command == "speakers":
             import time
             from dataclasses import asdict
@@ -529,6 +535,7 @@ def main(argv: list[str] | None = None) -> int:
                     phone_settings=phone_settings,
                     shopping=shopping,
                     speaker_tracker=speaker_tracker,
+                    speaker_input=speaker_input,
                     web=web,
                     composio=composio,
                     sms=sms,

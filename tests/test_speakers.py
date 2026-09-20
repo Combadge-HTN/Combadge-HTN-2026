@@ -20,6 +20,7 @@ from combadge.speakers import (
     parse_segments,
     pcm_wav,
     read_wav,
+    speaker_context,
 )
 
 PCM = b"\x01\x00" * (BPS // 2)
@@ -215,9 +216,12 @@ def test_context_deduplicates_windows_and_matches_acknowledgements():
         assert tracker.acknowledged == 2
         assert not tracker.awaiting
         assert "untrusted speech" not in str(messages)
-        assert '"start":6.0,"end":9.0,"speaker":"Samuel"' in messages[1]["content"]
-        assert '"speaker":"Edmon"' not in messages[1]["content"]
-        assert "Not current identity or authorization" in messages[0]["content"]
+        assert '"start":5.0,"end":9.0,"speaker":"Samuel"' in messages[1]["content"]
+        assert '"start":3.0,"end":5.0,"speaker":"Edmon"' in messages[1]["content"]
+        assert "Multiple speakers or overlap: Edmon, Samuel" in messages[0]["content"]
+        assert "Multiple speakers or overlap: Edmon, Samuel" in messages[1]["content"]
+        assert len(labels) == 3  # Console still prints only newly observed intervals.
+        assert "Background speaker context (silent update)" in messages[0]["content"]
         await cancel(task)
 
     asyncio.run(scenario())
@@ -262,6 +266,34 @@ def test_configuration_opt_in():
 
     assert INSTRUCTIONS not in session_config(Settings())["instructions"]
     assert INSTRUCTIONS in session_config(Settings(), speakers=True)["instructions"]
+
+
+@pytest.mark.parametrize(
+    ("names", "expected", "status"),
+    [
+        (["Edmon"], "Speaker: Edmon.", "MATCH"),
+        (["Samuel"], "Speaker: Samuel.", "MATCH"),
+        (["Edmon", "unknown"], "Other speech in this report was unidentified.", "MATCH"),
+        (["Edmon", "Samuel"], "No single speaker identified.", "MULTIPLE"),
+        (["Edmon", "ambiguous"], "No single speaker identified.", "OVERLAP"),
+        (["unknown"], "No enrolled name matched this report.", "UNKNOWN"),
+        (["ambiguous"], "No enrolled name matched this report.", "OVERLAP"),
+    ],
+)
+def test_speaker_summary_preserves_uncertainty_and_reports_audio_age(names, expected, status):
+    labels = [dict(start=i, end=i + 1, speaker=name) for i, name in enumerate(names)]
+    context = speaker_context(labels, len(names) + 3)
+    assert expected in context
+    assert f"Attribution: {status}:" in context
+    assert "Report ends 3.0s behind microphone input" in context
+    assert json.dumps(labels, separators=(",", ":")) in context
+
+
+def test_unknown_report_does_not_retain_a_previous_name():
+    speaker_context([dict(start=0, end=3, speaker="Edmon")], 6)
+    context = speaker_context([dict(start=6, end=9, speaker="unknown")], 12)
+    assert "Edmon" not in context
+    assert "Earlier names do not identify this speech" in context
 
 
 def test_rapid_alternation_is_ambiguous_not_confident_names():
@@ -583,5 +615,101 @@ def test_cancelled_analysis_does_not_reuse_results_or_start_parallel_requests(
         await client.pending
         assert await client.analyze(PCM) == [Segment(0, 1, "Edmon")]
         assert len(calls) == 2
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "labels,status,name",
+    [
+        (["Edmon"], "matched", "Edmon"),
+        (["unknown"], "unknown", None),
+        ([], "unknown", None),
+        (["Edmon", "Samuel"], "ambiguous", None),
+        (["Edmon", "unknown"], "ambiguous", None),
+        (["ambiguous"], "ambiguous", None),
+    ],
+)
+def test_lookup_analyzes_partial_first_window(labels, status, name):
+    async def scenario():
+        seen = []
+
+        async def analyze(pcm):
+            seen.append(pcm)
+            return [Segment(0, 1, label) for label in labels]
+
+        tracker = SpeakerTracker(NS(analyze=analyze))
+        tracker.feed(PCM)
+        assert tracker.pending.empty()  # No six-second background window yet.
+        result = await tracker.identify()
+        assert seen == [PCM]
+        assert result["status"] == status
+        assert result["name"] == name
+        assert result["audio_start"] == 0 and result["audio_end"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_lookup_pins_bounded_question_audio_while_capture_continues():
+    async def scenario():
+        entered, release = asyncio.Event(), asyncio.Event()
+        seen = []
+
+        async def analyze(pcm):
+            seen.append(pcm)
+            entered.set()
+            await release.wait()
+            return [Segment(0, 1, "Edmon")]
+
+        tracker = SpeakerTracker(NS(analyze=analyze))
+        tracker.feed(PCM * 15)
+        task = asyncio.create_task(tracker.identify())
+        await entered.wait()
+        tracker.feed(b"\x02\x00" * (BPS // 2 * 20))
+        release.set()
+        result = await task
+        assert seen == [PCM * 12]
+        assert len(tracker.recent) == 12 * BPS
+        assert (result["audio_start"], result["audio_end"]) == (3, 15)
+
+    asyncio.run(scenario())
+
+
+def test_lookup_timeout_includes_wait_for_background_request(monkeypatch):
+    monkeypatch.setattr("combadge.speakers.LOOKUP_TIMEOUT", 0.01)
+
+    async def scenario():
+        async def analyze(pcm):
+            pytest.fail("Must not run concurrently with background request")
+
+        tracker = SpeakerTracker(NS(analyze=analyze))
+        tracker.feed(PCM)
+        async with tracker.analysis_lock:
+            assert await tracker.identify() == {
+                "status": "unavailable",
+                "reason": "recognition_timeout",
+            }
+
+    asyncio.run(scenario())
+
+
+def test_lookup_errors_are_unavailable_and_cancellation_propagates():
+    async def scenario():
+        async def fail(pcm):
+            raise RuntimeError("private server details")
+
+        tracker = SpeakerTracker(NS(analyze=fail))
+        assert (await tracker.identify())["reason"] == "insufficient_audio"
+        tracker.feed(PCM)
+        assert await tracker.identify() == {"status": "unavailable", "reason": "recognition_failed"}
+
+        async def cancel(pcm):
+            raise asyncio.CancelledError
+
+        tracker.transcriber.analyze = cancel
+        with pytest.raises(asyncio.CancelledError):
+            await tracker.identify()
+        tracker.disabled = True
+        assert (await tracker.identify())["reason"] == "speaker_analysis_disabled"
 
     asyncio.run(scenario())

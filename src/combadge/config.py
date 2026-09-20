@@ -15,6 +15,7 @@ SHOPIFY_PROFILE_URL = (
 @dataclass(frozen=True)
 class Settings:
     openai_api_key: str = field(default="", repr=False)
+    speechmatics_api_key: str = field(default="", repr=False)
     browserbase_api_key: str = field(default="", repr=False)
     browserbase_project_id: str = field(default="", repr=False)
     composio_api_key: str = field(default="", repr=False)
@@ -41,6 +42,7 @@ def load_settings(env_file: Path = Path(".env")) -> Settings:
 
     return Settings(
         openai_api_key=value("OPENAI_API_KEY"),
+        speechmatics_api_key=value("SPEECHMATICS_API_KEY"),
         browserbase_api_key=value("BROWSERBASE_API_KEY"),
         browserbase_project_id=value("BROWSERBASE_PROJECT_ID"),
         composio_api_key=value("COMPOSIO_API_KEY"),
