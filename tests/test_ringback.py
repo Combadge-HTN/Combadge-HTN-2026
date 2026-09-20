@@ -100,3 +100,63 @@ def test_playback_only_start_reuses_player_when_capture_starts(tmp_path):
         assert audio.player.poll() is not None and audio.recorder.poll() is not None
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("status", [100, 180, 183])
+def test_sip_provisional_response_starts_ringback_only_for_call_progress(status):
+    from unittest.mock import AsyncMock, Mock
+
+    from combadge.phone.config import SipSettings
+    from combadge.phone.direct import SipCall, SipRejected
+    from combadge.phone.sip import Message
+
+    async def scenario():
+        config = SipSettings(
+            "test.pstn.twilio.com", "badge", "password", "+14165550100", {"edmon": "+14165550101"}
+        )
+        reports = []
+        call = SipCall(config, config.contacts["edmon"], reports.append)
+        call.sdp = b""
+        call.request = Mock(return_value=None)
+        call.send = AsyncMock()
+        played = asyncio.Event()
+        frames = []
+
+        class Audio:
+            async def start_playback(self):
+                pass
+
+            async def start(self):
+                raise AssertionError("Capture must remain closed before answer")
+
+            async def write(self, data):
+                frames.append(data)
+                played.set()
+
+        def response(code):
+            return Message(
+                f"SIP/2.0 {code} Test", [("Call-ID", call.call_id), ("CSeq", f"{call.cseq} INVITE")]
+            )
+
+        task = asyncio.create_task(invite_with_ringback(call, Audio(), enabled=True))
+        try:
+            await call.messages.put(response(status))
+            if status == 100:
+                await asyncio.sleep(0.04)
+                assert not frames and not reports
+            else:
+                await asyncio.wait_for(played.wait(), 1)
+                assert any(frames[0])
+                assert reports == [f"\nCall: {'ringing' if status == 180 else 'connecting'}\n"]
+            await call.messages.put(response(486))
+            with pytest.raises(SipRejected):
+                await asyncio.wait_for(task, 1)
+            count = len(frames)
+            await asyncio.sleep(0.04)
+            assert len(frames) == count
+            assert call.ended and call.on_ringing is None
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())

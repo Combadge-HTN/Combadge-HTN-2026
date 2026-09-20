@@ -175,8 +175,11 @@ class SipCall:
                 if message.status < 200:
                     self.provisional = True
                     if message.status in (180, 183):
-                        self.report("\nCall: ringing\n")
-                        if message.status == 180 and self.on_ringing is not None:
+                        status = "ringing" if message.status == 180 else "connecting"
+                        self.report(f"\nCall: {status}\n")
+                        # We do not consume provider early media before answer.
+                        # Supply local ringback for 183 progress as well as 180.
+                        if self.on_ringing is not None:
                             self.on_ringing()
                     continue
                 await self.acknowledge(message)
