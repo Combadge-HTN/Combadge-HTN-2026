@@ -53,3 +53,12 @@ def test_shopify_defaults_and_overrides(tmp_path):
         os.environ, {"SHOPIFY_AGENT_PROFILE_URL": "https://example.com/profile.json"}, clear=True
     ):
         assert load_settings(path).shopify_agent_profile_url == "https://example.com/profile.json"
+
+
+def test_speechmatics_credential_is_loaded_privately(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text("SPEECHMATICS_API_KEY=speaker-private-value\n")
+    with patch.dict(os.environ, {}, clear=True):
+        settings = load_settings(path)
+        assert settings.speechmatics_api_key == "speaker-private-value"
+        assert "speaker-private-value" not in repr(settings)

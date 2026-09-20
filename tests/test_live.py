@@ -683,3 +683,9 @@ def test_speaker_lookup_tool_composes_with_other_features(apps):
     assert names.count("identify_speaker") == 1
     assert backend["parallel_tool_calls"] is False
     assert "wait for its result" in config["instructions"]
+
+
+def test_streaming_speaker_context_does_not_enable_legacy_identity_tool():
+    config = session_config(Settings(), attributed_speakers=True)
+    assert "exact audio block" in config["instructions"]
+    assert "tools" not in config["delegation"]["responses"]

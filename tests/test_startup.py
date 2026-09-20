@@ -273,3 +273,33 @@ def test_invalid_enrollment_never_starts_bluetooth(tmp_path, tone):
         assert main(["start", *options, "--speaker", f"Edmon={tmp_path / 'missing.wav'}"]) == 2
     sudo.assert_not_called()
     radio.assert_not_called()
+
+
+def test_start_selects_streaming_speakers_without_legacy_background_tracker(tmp_path, monkeypatch):
+    from combadge.speakers import pcm_wav
+    from combadge.speechmatics import StreamingSpeakerInput
+
+    monkeypatch.delenv("SPEECHMATICS_API_KEY", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("OPENAI_API_KEY=test\nSPEECHMATICS_API_KEY=stream-test\n")
+    reference = tmp_path / "edmon.wav"
+    reference.write_bytes(pcm_wav(b"\x01\x00" * 48000))
+    with patch("combadge.live.connect_voice") as connect:
+        assert (
+            main(
+                [
+                    "start",
+                    "--no-bluetooth",
+                    "--no-calls",
+                    "--no-camera",
+                    "--no-shopify",
+                    "--env-file",
+                    str(env),
+                    "--speaker",
+                    f"Edmon={reference}",
+                ]
+            )
+            == 0
+        )
+    assert isinstance(connect.call_args.kwargs["speaker_input"], StreamingSpeakerInput)
+    assert connect.call_args.kwargs["speaker_tracker"] is None

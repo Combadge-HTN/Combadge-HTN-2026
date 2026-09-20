@@ -35,7 +35,35 @@ combadge voice --audio-backend commands \
 
 Speaker analysis uses standard-library HTTPS in a background thread, matching the catalog adapter. No extra HTTP package, subprocess transport, or runtime patch is needed. The capture contract remains 24 kHz mono PCM16. Speaker behavior with the physical microphone still requires validation; installing this prototype does not install audio drivers or helpers.
 
-## Behavior and latency
+## Streaming attribution before Live input
+
+With `SPEECHMATICS_API_KEY` in the selected `.env`, `--speaker` selects the streaming
+Speechmatics path. Without it, the older OpenAI background prototype below remains
+available. The streaming path is experimental and is not yet accepted for deployment.
+
+At startup, each supplied reference is enrolled with Speechmatics. Microphone PCM
+then goes to Speechmatics first. Final word-level speaker results resolve exact
+sample intervals in a bounded buffer. Only registered names survive; unregistered,
+missing, or overlapping identities become unknown. Unresolved intervals expire to
+unknown after four seconds of captured audio; late results cannot relabel released
+speech. A Live context acknowledgment is required before releasing the matching
+PCM. The legacy background labels and `identify_speaker` tool are not used in this
+mode. Pure digital silence does not generate identity updates.
+
+There is no required warm-up utterance or six-second recording minimum. Enrollment
+runs before the microphone opens. Processing and buffering still introduce latency.
+Long audio is processed incrementally with bounded memory; if the pipeline falls
+behind its buffer capacity it stops rather than dropping or misattributing speech.
+Context acceptance is not proof the model used it correctly: first questions,
+speaker switches, short input, unknown speakers, overlap, and speaker echo all need
+end-to-end acceptance tests. Current acceptance is incomplete.
+
+This mode sends the supplied reference clips and microphone stream to Speechmatics,
+and sends attributed microphone audio to OpenAI. Speaker identifiers are held in
+memory for the session. No new native QNX dependency is required; the existing
+WebSocket transport and PCM format are used.
+
+## OpenAI background prototype: behavior and latency
 
 Microphone audio goes to Live first. A background worker analyzes six-second windows every three seconds, with one request in flight and at most one pending window. When analysis falls behind, the newest pending window replaces the older one. This bounds buffering but can leave some speech unidentified.
 
