@@ -59,22 +59,23 @@ Calling `.venv/bin/combadge` directly requires no activation.
 
 ## Voice on QNX
 
-For microphone input, physical camera snapshots, and replies printed in the
-console, run on the Pi:
+For microphone input, Bluetooth speech output, physical camera snapshots, and
+human phone calls, turn on the speaker and run on the Pi:
 
 ```sh
 combadge start
 ```
 
-This does not open a playback device or require Bluetooth. It uses the checkout's
-`.env` from any working directory. Shopify search is enabled, and an existing
+Bluetooth and calling are enabled by default. Calling requires configured phone
+credentials and contacts in the checkout's `.env`, which is used from any working
+directory. Use `--no-calls` to disable calling. Shopify search is enabled, and an existing
 Shop login is used automatically. Startup selects physical camera unit 3 when
 present, otherwise unit 4; `--camera-unit N` overrides this choice.
 Say **“Computer, look at this”** to capture a
 camera image. Press **Ctrl+C** to stop. The default session limit is one hour;
 use `combadge start --max-seconds 180` for a short test, or `--no-camera` for
-microphone-only use. GPT-Live still generates audio server-side; this mode
-discards playback and displays the transcripts, and still uses API credits.
+use without the camera. Use `--no-bluetooth` for console-only replies; that mode
+still generates audio server-side and uses API credits.
 
 The prepared Pi has `~/bin/combadge` linked to this checkout's `.venv/bin/combadge`.
 On a new checkout, activate `.venv` first or run `.venv/bin/combadge start`.
@@ -94,7 +95,7 @@ For speaker output through Dan's existing Bluetooth example, turn on the TWS
 Mini Speaker, disconnect it from other devices, and run:
 
 ```sh
-combadge start --bluetooth
+combadge start
 ```
 
 This starts `~/projects/qnx-bluetooth/run-radio.sh`, connects the speaker, and

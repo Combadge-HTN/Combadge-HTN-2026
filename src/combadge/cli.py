@@ -38,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     from combadge.startup import add_arguments as start_arguments
 
     start = commands.add_parser(
-        "start", help="start microphone and camera with replies in the console"
+        "start", help="start microphone, camera, Bluetooth replies, and calling"
     )
     start_arguments(start)
     doctor = commands.add_parser("doctor", help="show configuration and audio tool availability")
