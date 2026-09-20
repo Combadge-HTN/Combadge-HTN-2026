@@ -9,6 +9,18 @@ import pytest
 from combadge.echo import EchoReference, SpeexEcho, configured_echo
 
 
+def speech_sample(index):
+    # Changing pitch and syllabic envelopes exercise speech preservation. A steady
+    # sine wave is classified as background noise by the residual preprocessor.
+    t = index / 24000
+    syllable = int(t / 0.18)
+    envelope = math.sin(math.pi * ((t % 0.18) / 0.18)) ** 2
+    pitch = 140 + 31 * (syllable % 5)
+    return round(
+        1500 * envelope * sum(math.sin(2 * math.pi * pitch * h * t) / h for h in range(1, 5))
+    )
+
+
 @pytest.fixture
 def speex_library():
     # QNX's configured library can be present even when find_library returns None.
@@ -93,12 +105,7 @@ def test_native_canceller_reduces_echo_and_preserves_near_end_speech(
             reference = [rng.randint(-6000, 6000) for _ in range(480)]
             references.append(reference)
             acoustic = references[max(0, block - 2)]
-            near = [
-                round(1500 * math.sin(2 * math.pi * 731 * (block * 480 + i) / 24000))
-                if block >= 500
-                else 0
-                for i in range(480)
-            ]
+            near = [speech_sample(block * 480 + i) if block >= 500 else 0 for i in range(480)]
             mic = [int(0.5 * a) + n for a, n in zip(acoustic, near)]
             output = struct.unpack(
                 "<480h", echo.process(struct.pack("<480h", *mic), struct.pack("<480h", *reference))
@@ -109,17 +116,7 @@ def test_native_canceller_reduces_echo_and_preserves_near_end_speech(
             if block >= 600:
                 # The residual suppressor adds exactly one frame of latency.
                 expected = [
-                    round(
-                        1500
-                        * math.sin(
-                            2
-                            * math.pi
-                            * 731
-                            * ((block - int(residual_suppression)) * 480 + i)
-                            / 24000
-                        )
-                    )
-                    for i in range(480)
+                    speech_sample((block - int(residual_suppression)) * 480 + i) for i in range(480)
                 ]
                 near_energy += sum(x * x for x in expected)
                 error_energy += sum((a - b) ** 2 for a, b in zip(output, expected))
@@ -155,10 +152,7 @@ def test_native_cancellation_with_jittery_io_preserves_interruption(
                 reference.playback(struct.pack("<480h", *far[i]))
                 continue
             acoustic = far[i - 4] if i >= 4 else [0] * 480
-            near = [
-                round(1500 * math.sin(2 * math.pi * 731 * (i * 480 + j) / 24000)) if i >= 500 else 0
-                for j in range(480)
-            ]
+            near = [speech_sample(i * 480 + j) if i >= 500 else 0 for j in range(480)]
             mic = [int(0.5 * a) + n for a, n in zip(acoustic, near)]
             out = struct.unpack(
                 "<480h", echo.process(struct.pack("<480h", *mic), reference.capture_reference())
@@ -168,13 +162,7 @@ def test_native_cancellation_with_jittery_io_preserves_interruption(
                 clean_energy += sum(x * x for x in out)
             if i >= 600:
                 expected = [
-                    round(
-                        1500
-                        * math.sin(
-                            2 * math.pi * 731 * ((i - int(residual_suppression)) * 480 + j) / 24000
-                        )
-                    )
-                    for j in range(480)
+                    speech_sample((i - int(residual_suppression)) * 480 + j) for j in range(480)
                 ]
                 near_energy += sum(x * x for x in expected)
                 error_energy += sum((x - y) ** 2 for x, y in zip(out, expected))
@@ -208,3 +196,28 @@ def test_env_file_configures_echo_without_mutating_environment(tmp_path, monkeyp
     assert settings.echo_delay_ms == "500"
     monkeypatch.setenv("COMBADGE_AEC", "off")
     assert load_settings(path).echo_mode == "off"
+
+
+def test_residual_stage_adds_suppression_beyond_linear_cancellation(speex_library):
+    linear = SpeexEcho(speex_library, residual_suppression=False)
+    residual = SpeexEcho(speex_library)
+    rng = random.Random(731)
+    history = []
+    energies = [0, 0]
+    try:
+        for block in range(500):
+            frame = [rng.randint(-6000, 6000) for _ in range(480)]
+            history.append(frame)
+            acoustic = history[max(0, block - 2)]
+            mic = struct.pack("<480h", *(int(0.5 * v) for v in acoustic))
+            reference = struct.pack("<480h", *frame)
+            for i, processor in enumerate((linear, residual)):
+                output = struct.unpack("<480h", processor.process(mic, reference))
+                if block >= 400:
+                    energies[i] += sum(v * v for v in output)
+        # Steady far-end signal: the final two seconds are not sensitive to the
+        # preprocessor's extra frame. Require at least 10 dB additional rejection.
+        assert energies[1] < energies[0] / 10
+    finally:
+        residual.close()
+        linear.close()

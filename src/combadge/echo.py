@@ -70,11 +70,8 @@ class SpeexEcho:
         # SPEEX_PREPROCESS_SET_ECHO_STATE takes the echo-state pointer itself.
         if self.lib.speex_preprocess_ctl(self.preprocessor, 24, self.state) != 0:
             raise RuntimeError("Could not link residual echo suppression")
-        # This feature removes speaker echo, not steady near-end sounds. Keep
-        # the generic noise-suppression floor at 0 dB so those remain audible.
-        noise_floor = ctypes.c_int(0)  # SPEEX_PREPROCESS_SET_NOISE_SUPPRESS
-        if self.lib.speex_preprocess_ctl(self.preprocessor, 18, ctypes.byref(noise_floor)) != 0:
-            raise RuntimeError("Could not configure residual echo suppression")
+        # Keep Speex's default noise floor. Forcing it to 0 dB also limits
+        # residual echo suppression in bins shared with estimated background noise.
 
     def process(self, captured, reference):
         if not self.state:

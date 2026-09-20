@@ -34,8 +34,10 @@ learns the fixed gain as part of the echo path.
 Capture and playback reference positions advance by sample count within a
 continuous stream, rather than realigning on every thread wakeup. After linear
 cancellation, Speex's residual echo suppressor uses the canceller's echo estimate.
-Generic noise suppression is disabled to preserve near-end sounds. This stage
-adds one 20 ms frame of latency; it does not mute the microphone during playback.
+Speex's default noise suppression remains enabled: forcing its floor to 0 dB
+also weakens residual echo suppression. Steady background tones can be attenuated;
+validation checks changing speech and interruptions. This stage adds one 20 ms
+frame of latency; it does not mute the microphone during playback.
 
 Set `COMBADGE_AEC=off` to disable it (the default). Enabling it with an absent
 library or missing/invalid delay fails explicitly instead of silently claiming
@@ -74,6 +76,21 @@ microphone while that sample played through the speaker. No Live session ran in
 that diagnostic, so the result establishes residual audible speech without a
 feedback loop. Do not treat recorded-signal attenuation as conversational acceptance.
 This is not yet an effective echo solution for the complete setup.
+
+A subsequent in-memory timing check measured 462 and 468 ms from software playback
+submission to matching captured audio in two usable speech windows. That includes
+capture buffering; it does not isolate the speaker's physical latency. Other
+windows did not validate, so this is not a stable recalibration. The filter removed
+about 12 dB of the correlated speaker component, but the phrase remained recognizable.
+
+Offline comparison then identified the 0 dB noise-floor override as a contributor
+to weak residual suppression. Restoring Speex's default improved rejection on both
+existing acoustic recordings. An independent Edmon speech recording changed by
+0.49 dB in overall level; mixed into recorded echo at +6 dB relative RMS, its main
+sentence remained transcribable with both settings, with word errors at the
+boundaries. These checks support removing the override, but do not establish
+speaker-on acceptance or preservation of every quiet interruption. No calibration
+or microphone recordings are committed to the repository.
 
 If independent clocks defeat this prototype, use a shared-clock USB audio device
 for microphone and speaker, or integrate an echo canceller with delay estimation
