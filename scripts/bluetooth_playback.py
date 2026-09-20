@@ -11,7 +11,8 @@ from pathlib import Path
 class Resampler:
     """Stateful linear interpolation; retain phase across arbitrary input chunks."""
 
-    def __init__(self):
+    def __init__(self, gain=1):
+        self.gain = gain
         self.samples = array("h")
         self.position = 0
         self.pending = b""
@@ -36,6 +37,7 @@ class Resampler:
             value = round(
                 (self.samples[index] * (147 - fraction) + self.samples[index + 1] * fraction) / 147
             )
+            value = max(-32768, min(32767, round(value * self.gain)))
             output.extend((value, value))
             self.position += 80
         consumed = min(self.position // 147, max(0, len(self.samples) - 1))
@@ -46,8 +48,8 @@ class Resampler:
         return output.tobytes()
 
 
-def converted_input():
-    resampler = Resampler()
+def converted_input(gain=1):
+    resampler = Resampler(gain=gain)
     while data := os.read(sys.stdin.fileno(), 960):
         if output := resampler.feed(data):
             yield output
@@ -71,6 +73,7 @@ def main():
 
     try:
         # Reuse the driver's bounded FIFO writes, backpressure, and disconnect handling.
+        # Keep full dynamic range. Set volume in the driver, not by clipping speech.
         send_pcm(converted_input())
     except (OSError, ValueError, TimeoutError) as error:
         parser.exit(1, f"Bluetooth playback: {error}\n")

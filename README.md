@@ -38,7 +38,10 @@ combadge start
 ```
 
 This does not open a playback device or require Bluetooth. It uses the checkout's
-`.env` from any working directory. Say **“Computer, look at this”** to capture a
+`.env` from any working directory. Shopify search is enabled, and an existing
+Shop login is used automatically. Startup selects physical camera unit 3 when
+present, otherwise unit 4; `--camera-unit N` overrides this choice.
+Say **“Computer, look at this”** to capture a
 camera image. Press **Ctrl+C** to stop. The default session limit is one hour;
 use `combadge start --max-seconds 180` for a short test, or `--no-camera` for
 microphone-only use. GPT-Live still generates audio server-side; this mode
@@ -172,6 +175,21 @@ audio conversion itself. See [calling setup](docs/CALLING.md) for credentials,
 QNX requirements, hang-up behavior, and validation limits. Calls use Twilio credits.
 
 ## Shopping with Shopify
+
+On the prepared Pi, shopping is enabled by default:
+
+```sh
+combadge start
+```
+
+For account-based merchant checkout, run `combadge shop-account login` once.
+Future starts detect the saved credentials automatically. Without credentials,
+search and guest checkout links remain available. Invalid or expired credentials
+that cannot be refreshed produce a login error; use `--no-shop-account` for guest
+mode. Use `--no-shopify` to disable shopping entirely, or `--shop-account` to require
+account mode explicitly. These options also work with `--bluetooth`;
+`--shop-auth-file PATH` selects a custom credential file.
+Account checkout does not confirm that the item appears in the Shop app cart.
 
 Enable product discovery and checkout handoff with `--shopify`:
 

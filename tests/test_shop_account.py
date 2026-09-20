@@ -283,7 +283,8 @@ def test_checkout_trace_retains_retrieval_evidence_without_buyer_or_payment_data
     ):
         result = account.prepare("bottles.myshopify.com", VID, 1, "CA")
     assert result["app_visibility"] == "unverified"
-    assert "NOT been verified" in result["message"]
+    assert "unpaid checkout" in result["message"]
+    assert "visibility" not in result["message"]
     path = account.trace_dir / f"{result['trace_id']}.json"
     assert path.stat().st_mode & 0o777 == 0o600
     saved = json.loads(path.read_text())

@@ -452,8 +452,6 @@ def checkout_summary(envelope, variant_id, quantity):
             "shipping_exceeds_items": totals.get("fulfillment", 0) > totals.get("subtotal", 0),
             "review_required": checkout["status"] != "ready_for_complete",
             "message": "The merchant created an unpaid checkout using your Shop account. "
-            "Visibility in the Shop app has NOT been verified. "
-            "Do not claim it is in the app or cart. "
             "No payment or order was submitted. Totals may change during final review.",
         }
     except KeyError, ValueError, TypeError, AttributeError, StopIteration:

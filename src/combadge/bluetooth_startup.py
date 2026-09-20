@@ -61,6 +61,9 @@ class Startup:
 class Radio:
     def __init__(self, directory):
         self.master, slave = pty.openpty()
+        environment = os.environ.copy()
+        # User-approved full PCM amplitude; preserve explicit quieter overrides.
+        environment.setdefault("QNX_PCM_VOLUME_SHIFT", "0")
         try:
             self.process = subprocess.Popen(
                 ["sh", "./run-radio.sh"],
@@ -69,6 +72,7 @@ class Radio:
                 stdout=slave,
                 stderr=slave,
                 start_new_session=True,
+                env=environment,
             )
         except BaseException:
             os.close(self.master)
@@ -154,6 +158,8 @@ def idle_pins():
 
 
 def run(args):
+    from combadge.startup import shopping_arguments
+
     if platform.system() != "QNX" or os.geteuid() != 0 or not os.environ.get("SUDO_USER"):
         raise RuntimeError("Run combadge start on the QNX Pi as qnxuser (it invokes sudo)")
     user = os.environ["SUDO_USER"]
@@ -241,6 +247,7 @@ def run(args):
                         command.extend(["--camera", "--camera-unit", str(args.camera_unit)])
                     if args.save_snapshots is not None:
                         command.extend(["--save-snapshots", str(args.save_snapshots)])
+                    command.extend(shopping_arguments(args))
                 print("Speaker stream ready. Starting test… Ctrl+C stops everything.", flush=True)
                 app = subprocess.Popen(
                     ["sudo", "-u", user, "--", *command],
@@ -252,8 +259,11 @@ def run(args):
                     radio.poll()
                 if app.returncode:
                     raise RuntimeError(f"Application exited with status {app.returncode}")
-                if args.tone:
-                    time.sleep(1)  # Let the short FIFO tail reach the speaker.
+                # The app has flushed its helper; allow the bounded FIFO and
+                # Bluetooth transport tail to reach the speaker before teardown.
+                deadline = time.monotonic() + 1
+                while time.monotonic() < deadline:
+                    radio.poll()
             finally:
                 try:
                     stop_process(app, signal.SIGINT, 20)
@@ -273,6 +283,8 @@ def run(args):
 
 
 def launch(args):
+    from combadge.startup import shopping_arguments
+
     if args.max_seconds <= 0:
         print("--max-seconds must be positive", file=sys.stderr)
         return 2
@@ -302,6 +314,12 @@ def launch(args):
             command.extend(["--save-snapshots", str(args.save_snapshots.expanduser().resolve())])
         if args.tone:
             command.append("--tone")
+        shopping = shopping_arguments(args)
+        command.extend(shopping)
+        if "--shopify" not in shopping:
+            command.append("--no-shopify")
+        if "--shop-account" not in shopping:
+            command.append("--no-shop-account")
         # Replace this process so Ctrl+C reaches the supervisor directly.
         os.execvp(command[0], command)
     try:

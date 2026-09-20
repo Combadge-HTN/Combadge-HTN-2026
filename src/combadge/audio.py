@@ -126,6 +126,19 @@ class CommandAudio:
             return
         await asyncio.to_thread(self._write_all, data)
 
+    async def drain(self) -> None:
+        """Send EOF so the playback helper can flush its final samples."""
+        if self.player is None:
+            return
+        if self.player.stdin is not None and not self.player.stdin.closed:
+            self.player.stdin.close()
+        try:
+            code = await asyncio.to_thread(self.player.wait, timeout=3)
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError("Playback helper did not finish within three seconds") from error
+        if code:
+            raise RuntimeError(f"Playback helper exited with status {code}")
+
     async def close(self) -> None:
         processes = [p for p in (self.recorder, self.player) if p is not None]
         # Stop both ends before waiting, releasing blocked capture and playback threads.

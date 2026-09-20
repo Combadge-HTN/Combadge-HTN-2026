@@ -347,7 +347,7 @@ class ShoppingSession:
             trace_id = getattr(self.account, "last_trace_id", None)
             if isinstance(trace_id, str):
                 self.report(f"Shop trace: {trace_id}\n")
-        self.report("Merchant checkout created; Shop app visibility is unverified.\n")
+        self.report("Unpaid merchant checkout created.\n")
         return {**result, "title": offer["title"], "seller": offer["seller"]}
 
     async def checkout(self, variant_id: str) -> dict:

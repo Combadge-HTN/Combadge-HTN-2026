@@ -204,9 +204,11 @@ def session_config(
                 "If offer_changed, explain the change and ask again. Never silently substitute. "
                 "A successful save creates a merchant checkout using the connected Shop account. "
                 "app_visibility=unverified means phone visibility is UNKNOWN: never say saved "
-                "to the cart, ready in Shop, or synced to the phone. Say the merchant checkout "
-                "was created but you cannot verify it appears in the Shop app. Merchants have "
-                "separate "
+                "to the cart, ready in Shop, or synced to the phone. On success, briefly say "
+                "the unpaid checkout was created and report its total. Do not volunteer Shop "
+                "app visibility caveats; explain that limitation only when the buyer explicitly "
+                "asks about app visibility, synchronization, or current cart contents. "
+                "Merchants have separate "
                 "checkouts. Do not open a browser or read URLs aloud. Never promise app sync "
                 "on a tool failure. Never retry an uncertain save automatically; tell the buyer "
                 "to check the app first. Quote the returned total with currency, shipping and "
@@ -217,9 +219,11 @@ def session_config(
             )
             config["instructions"] += (
                 " The buyer connected their Shop account. A confirmed merchant checkout does NOT "
-                "confirm Shop app cart visibility. When app_visibility is unverified, say the "
-                "checkout was created but phone visibility is unconfirmed; never claim it is "
-                "saved or ready in the Shop app or cart. Report returned total, shipping and tax; "
+                "confirm Shop app cart visibility. On success, briefly say the unpaid checkout "
+                "was created and report its total. Do not volunteer Shop app visibility caveats; "
+                "explain that limitation only when the buyer explicitly asks about app visibility, "
+                "synchronization, or current cart contents. Never claim verified app or cart "
+                "visibility without evidence. Report returned total, shipping and tax; "
                 "warn about high shipping. The shipping/tax exclusion applies only to catalog "
                 "prices, not returned checkout totals. Never claim a purchase or open a browser. "
                 "Delegate requests to add or save an item, including follow-up confirmations."
@@ -364,7 +368,11 @@ async def run_session(
 
     async def play_audio() -> None:
         while True:
-            await audio.write(await playback.get())
+            data = await playback.get()
+            try:
+                await audio.write(data)
+            finally:
+                playback.task_done()
 
     async def receive() -> None:
         nonlocal last_speaker, image_delegation, image_response, image_speech_bytes
@@ -529,8 +537,24 @@ async def run_session(
             raise RuntimeError(f"GPT-Live ended the session: {stats.close_reason}")
     finally:
         failure_in_flight = sys.exc_info()[0] is not None
+        # Freeze producers first, but let already received speech finish on
+        # normal timeout/stop. Errors retain immediate teardown semantics.
+        player = tasks[2] if len(tasks) >= 3 else None
         for task in tasks:
-            task.cancel()
+            if task is not player or failure_in_flight:
+                task.cancel()
+        await asyncio.gather(*(t for t in tasks if t is not player), return_exceptions=True)
+        if player is not None and not failure_in_flight:
+            try:
+                async with asyncio.timeout(4):
+                    await playback.join()
+                    drain = getattr(audio, "drain", None)
+                    if drain is not None:
+                        await drain()
+            except (TimeoutError, OSError, RuntimeError) as error:
+                report(f"\nWarning: playback drain incomplete: {error}\n")
+        if player is not None:
+            player.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         try:
             await audio.close()
@@ -546,7 +570,8 @@ async def run_session(
                     report("\nWarning: server session finalization was not confirmed.\n")
     report(
         f"\nSession closed ({stats.close_reason}). "
-        f"Sent {stats.sent_bytes} audio bytes; received {stats.received_bytes}.\n"
+        f"Sent {stats.sent_bytes} audio bytes; received {stats.received_bytes}; "
+        f"non-silent audio chunks: {stats.speech_bytes} bytes.\n"
     )
     if image is not None and shopping is None:
         for label, elapsed in (
