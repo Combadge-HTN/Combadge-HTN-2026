@@ -303,3 +303,122 @@ def test_start_selects_streaming_speakers_without_legacy_background_tracker(tmp_
         )
     assert isinstance(connect.call_args.kwargs["speaker_input"], StreamingSpeakerInput)
     assert connect.call_args.kwargs["speaker_tracker"] is None
+
+
+def saved_speakers(tmp_path, monkeypatch):
+    import json
+
+    from combadge.speakers import pcm_wav
+
+    monkeypatch.delenv("COMBADGE_SPEAKERS", raising=False)
+    env = tmp_path / ".env"
+    mapping = {"Edmon": "edmon reference.wav", "Samuel": "samuel.wav"}
+    for path in mapping.values():
+        (tmp_path / path).write_bytes(pcm_wav(b"\x01\x00" * 48000))
+    env.write_text(
+        "OPENAI_API_KEY=test\nSPEECHMATICS_API_KEY=stream-test\n"
+        + "COMBADGE_SPEAKERS='"
+        + json.dumps(mapping)
+        + "'\n"
+    )
+    return env, [f"{name}={tmp_path / path}" for name, path in mapping.items()]
+
+
+def test_plain_start_loads_saved_speakers_from_default_env_before_bluetooth(tmp_path, monkeypatch):
+    _, expected = saved_speakers(tmp_path, monkeypatch)
+    monkeypatch.setattr("combadge.startup.ROOT", tmp_path)
+    monkeypatch.chdir(tmp_path.parent)
+    with patch("combadge.bluetooth_startup.launch", return_value=0) as bluetooth:
+        assert main(["start"]) == 0
+    assert bluetooth.call_args.args[0].speaker == expected
+
+
+def test_saved_speakers_survive_sudo_and_reach_streaming_voice(tmp_path, monkeypatch, capsys):
+    import argparse
+
+    from combadge.speechmatics import StreamingSpeakerInput
+    from combadge.startup import add_arguments
+
+    env, expected = saved_speakers(tmp_path, monkeypatch)
+    monkeypatch.delenv("SPEECHMATICS_API_KEY", raising=False)
+    with (
+        patch("combadge.bluetooth_startup.platform.system", return_value="QNX"),
+        patch("combadge.bluetooth_startup.os.geteuid", return_value=1000),
+        patch("combadge.bluetooth_startup.os.execvp", side_effect=SystemExit) as execute,
+        pytest.raises(SystemExit),
+    ):
+        main(["start", "--env-file", str(env), "--no-calls", "--no-camera", "--no-shopify"])
+    command = execute.call_args.args[1]
+    monkeypatch.chdir(tmp_path.parent)
+    parser = argparse.ArgumentParser()
+    add_arguments(parser)
+    args = parser.parse_args(command[command.index("combadge.bluetooth_startup") + 1 :])
+    assert args.speaker == expected
+    args.bluetooth = False
+    with patch("combadge.live.connect_voice") as connect:
+        assert launch(args) == 0
+    assert isinstance(connect.call_args.kwargs["speaker_input"], StreamingSpeakerInput)
+    assert connect.call_args.kwargs["speaker_tracker"] is None
+    assert "Speechmatics streaming configured for Edmon, Samuel" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("options", [["--no-speakers"], ["--tone"]])
+def test_saved_speakers_can_be_disabled_or_ignored_for_tone(tmp_path, monkeypatch, options):
+    env, _ = saved_speakers(tmp_path, monkeypatch)
+    # Disabling must work even with broken saved configuration.
+    env.write_text("COMBADGE_SPEAKERS=invalid-json\n")
+    with patch("combadge.bluetooth_startup.launch", return_value=0) as bluetooth:
+        assert main(["start", "--env-file", str(env), *options]) == 0
+    assert bluetooth.call_args.args[0].speaker == []
+
+
+def test_no_speakers_survives_sudo(tmp_path, monkeypatch):
+    env, _ = saved_speakers(tmp_path, monkeypatch)
+    with (
+        patch("combadge.bluetooth_startup.platform.system", return_value="QNX"),
+        patch("combadge.bluetooth_startup.os.geteuid", return_value=1000),
+        patch("combadge.bluetooth_startup.os.execvp", side_effect=SystemExit) as execute,
+        pytest.raises(SystemExit),
+    ):
+        main(["start", "--env-file", str(env), "--no-speakers"])
+    command = execute.call_args.args[1]
+    assert "--no-speakers" in command
+    assert "--speaker" not in command
+
+
+def test_explicit_speakers_replace_saved_list(tmp_path, monkeypatch):
+    env, expected = saved_speakers(tmp_path, monkeypatch)
+    with patch("combadge.bluetooth_startup.launch", return_value=0) as bluetooth:
+        assert main(["start", "--env-file", str(env), "--speaker", expected[1]]) == 0
+    assert bluetooth.call_args.args[0].speaker == [expected[1]]
+
+
+@pytest.mark.parametrize("saved", ["bad-json", "[]", '{"Edmon":false}', '{"Edmon":"missing.wav"}'])
+def test_invalid_saved_speakers_fail_before_bluetooth(tmp_path, monkeypatch, saved):
+    monkeypatch.delenv("COMBADGE_SPEAKERS", raising=False)
+    env = tmp_path / ".env"
+    env.write_text(f"COMBADGE_SPEAKERS='{saved}'\n")
+    with patch("combadge.bluetooth_startup.launch") as bluetooth:
+        assert main(["start", "--env-file", str(env)]) == 2
+    bluetooth.assert_not_called()
+
+
+def test_no_speakers_cannot_be_combined_with_explicit_enrollment():
+    with pytest.raises(SystemExit) as error:
+        main(["start", "--no-speakers", "--speaker", "Edmon=example.wav"])
+    assert error.value.code == 2
+
+
+def test_privileged_entry_point_loads_defaults_and_honors_opt_out(tmp_path, monkeypatch):
+    from combadge import bluetooth_startup
+
+    env, expected = saved_speakers(tmp_path, monkeypatch)
+    for options, speakers in (([], expected), (["--no-speakers"], [])):
+        monkeypatch.setattr("sys.argv", ["combadge.start", "--env-file", str(env), *options])
+        with (
+            patch.object(bluetooth_startup.platform, "system", return_value="QNX"),
+            patch.object(bluetooth_startup.os, "geteuid", return_value=0),
+            patch.object(bluetooth_startup, "run") as run,
+        ):
+            assert bluetooth_startup.main() == 0
+        assert run.call_args.args[0].speaker == speakers

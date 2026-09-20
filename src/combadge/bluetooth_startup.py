@@ -329,6 +329,8 @@ def launch(args):
             command.append("--tone")
         command.append("--calls" if args.calls else "--no-calls")
         command.extend(speaker_arguments(args))
+        if args.no_speakers:
+            command.append("--no-speakers")
         shopping = shopping_arguments(args)
         command.extend(shopping)
         if "--shopify" not in shopping:
@@ -349,10 +351,11 @@ def launch(args):
 
 def main():
     from combadge.startup import add_arguments
+    from combadge.startup import launch as start
 
     parser = argparse.ArgumentParser(prog="combadge start", description=__doc__)
     add_arguments(parser)
-    return launch(parser.parse_args())
+    return start(parser.parse_args())
 
 
 if __name__ == "__main__":

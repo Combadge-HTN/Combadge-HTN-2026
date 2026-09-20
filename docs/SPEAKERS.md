@@ -13,7 +13,20 @@ python -m pip install --no-deps -e .
 
 Prepare one clean, single-person WAV reference for each speaker: 2–10 seconds, PCM16, mono or stereo, 8–96 kHz. The application uses the first four seconds (or the whole clip if shorter), mixes stereo to mono, and preserves the sample rate. This keeps reference uploads below the API form-part size limit. Choose clearly audible speech from the start, with no other voices or music. Use recordings the speakers have agreed to enroll. Keep them outside source control; WAV files and `recordings/` are ignored by Git. No persistent voice profile is created remotely by this application.
 
-Start the Pi with Bluetooth replies and enrolled speakers:
+To load enrolled speakers with plain `combadge start`, save a JSON name-to-WAV-path
+map in the selected `.env` file:
+
+```dotenv
+COMBADGE_SPEAKERS='{"Edmon":"recordings/edmon.wav","Samuel":"recordings/samuel.wav"}'
+```
+
+Relative configured paths resolve from that `.env` file, including across sudo.
+`--no-speakers` disables enrollment for a session. Explicit `--speaker` options
+replace the saved list. Invalid configured references stop startup before Bluetooth
+or microphone access. Tone tests ignore the saved list. Startup prints the selected
+speaker backend and names, or explicitly reports that identification is off.
+
+Start the Pi with Bluetooth replies and an explicit list of enrolled speakers:
 
 ```sh
 combadge start \
