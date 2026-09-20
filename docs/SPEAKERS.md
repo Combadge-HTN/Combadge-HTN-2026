@@ -45,9 +45,12 @@ At startup, each supplied reference is enrolled with Speechmatics. Microphone PC
 then goes to Speechmatics first. Final word-level speaker results resolve exact
 sample intervals in a bounded buffer. Only registered names survive; unregistered,
 missing, or overlapping identities become unknown. Unresolved intervals expire to
-unknown after four seconds of captured audio; late results cannot relabel released
-speech. A Live context acknowledgment is required before releasing the matching
-PCM. The legacy background labels and `identify_speaker` tool are not used in this
+unknown after two seconds of captured audio; late results cannot relabel released
+speech. Audio uses a fixed five-second staging delay. One-second attribution packets
+are prepared concurrently, with source-aligned word snippets and their scheduled
+Live input times. A Live context acknowledgment is required before releasing the
+matching PCM. If context misses its scheduled deadline, voice stops rather than
+shifting the stream or playing audio with stale labels. The legacy background labels and `identify_speaker` tool are not used in this
 mode. Pure digital silence does not generate identity updates.
 
 There is no required warm-up utterance or six-second recording minimum. Enrollment

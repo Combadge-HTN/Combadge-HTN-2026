@@ -180,24 +180,31 @@ async def enroll(api_key, reference):
 
 
 class StreamingSpeakerInput:
-    """Keep raw capture behind finalized attribution and Live context acceptance."""
+    """A fixed-delay input stream; context preparation runs ahead of playback.
+
+    Every capture sample has one scheduled Live sample. Provider results expire
+    to unknown before that deadline. Context updates are pipelined, so a long
+    utterance does not accumulate a new acknowledgment delay for every packet.
+    """
+
+    DELAY = 5 * RATE
+    PROVIDER_DEADLINE = 2 * RATE
 
     def __init__(self, api_key, references, *, profiles=None):
-        from collections import deque
-
-        from combadge.speaker_input import AttributionBuffer, ContextBeforeAudio
+        from combadge.speaker_input import AttributionBuffer
 
         self.api_key = api_key
         self.references = references
         self.profiles = profiles
         self.names = {r.name for r in references}
         self.buffer = AttributionBuffer(self.names)
-        self.gate = ContextBeforeAudio()
         self.outgoing = asyncio.Queue(maxsize=100)
         self.available = asyncio.Event()
-        self.drained = asyncio.Event()
-        self.drained.set()
-        self.playable = deque()
+        self.batches = {}
+        self.gates = {}
+        self.words = []
+        self.live_samples = 0
+        self.prepared = 0
         self.connection_context = None
         self.websocket = None
         self.sequence = 0
@@ -214,26 +221,42 @@ class StreamingSpeakerInput:
             self.outgoing.put_nowait(pcm)
         except asyncio.QueueFull:
             raise RuntimeError("Streaming speaker connection fell behind") from None
-        # Missing/late provider results expire per interval, never to a previous name.
-        expired = self.buffer.received - 4 * RATE
+        expired = self.buffer.received - self.PROVIDER_DEADLINE
         if expired > self.buffer.resolved:
             self.buffer.resolve(expired, [])
         self.available.set()
 
     def frame(self, size):
-        if not self.playable:
+        if size <= 0 or size % 2:
+            raise ValueError("Expected a positive PCM16 frame size")
+        samples = size // 2
+        if self.live_samples < self.DELAY:
+            self.live_samples += samples
             return bytes(size)
-        data = self.playable.popleft()
-        if len(data) > size:
-            self.playable.appendleft(data[size:])
-        if not self.playable:
-            self.drained.set()
-        return data[:size].ljust(size, b"\0")
+        source = self.live_samples - self.DELAY
+        index = source // RATE
+        batch = self.batches.get(index)
+        if batch is None or not batch["ready"]:
+            # Do not shift the stream and invalidate every later attribution time.
+            raise RuntimeError("Speaker context missed its audio deadline; stopping voice")
+        offset = (source - index * RATE) * 2
+        pcm = batch["pcm"][offset : offset + size]
+        if len(pcm) != size:
+            raise RuntimeError("Audio frame crosses the attribution packet boundary")
+        self.live_samples += samples
+        if source + samples == (index + 1) * RATE:
+            self.batches.pop(index)
+        return pcm
 
     def observe(self, event):
-        return self.gate.observe(event)
+        for gate in tuple(self.gates.values()):
+            if gate.observe(event):
+                return True
+        return False
 
     async def run(self, connection, report, *, captions=True):
+        from combadge.speaker_input import AttributedAudio, ContextBeforeAudio
+
         async def upload():
             while True:
                 pcm = await self.outgoing.get()
@@ -247,49 +270,80 @@ class StreamingSpeakerInput:
                 if parsed is not None:
                     end, spans = parsed
                     self.buffer.resolve(end, spans)
+                    for word, span in zip(
+                        (r for r in message["results"] if r.get("type") == "word"), spans
+                    ):
+                        if span.end > self.prepared:
+                            text = str(word.get("alternatives", [{}])[0].get("content", ""))
+                            self.words.append((span.start, span.end, text[:80]))
                     self.available.set()
                 if message.get("message") == "EndOfTranscript":
                     raise RuntimeError("Speaker recognition stopped during voice capture")
 
-        async def release():
+        async def prepare(index, chunks, anchors):
+            pcm = b"".join(c.pcm for c in chunks)
+            batch = {"pcm": pcm, "ready": False}
+            self.batches[index] = batch
+            # Silence is already unknown in the initial instructions and cannot
+            # contain a voice. It needs no new context or extra processing delay.
+            if any(pcm):
+                gate = ContextBeforeAudio(prefix=f"speaker_packet_{index}")
+                self.gates[index] = gate
+                try:
+                    await gate.prepare(
+                        connection,
+                        chunks,
+                        live_start=index + self.DELAY / RATE,
+                        words=anchors,
+                    )
+                finally:
+                    self.gates.pop(index, None)
+            batch["ready"] = True
+            if captions and anchors:
+                report(
+                    f"\n[Speaker input {index:.0f}–{index + 1:.0f}s: "
+                    + "; ".join(f"{name}: {text}" for name, text in anchors)
+                    + "]\n"
+                )
+
+        async def schedule(group):
             while True:
-                await self.drained.wait()
                 await self.available.wait()
                 self.available.clear()
-                chunks = []
-                # Batch ready intervals into one context update, respecting the Live
-                # context size limit and retaining per-speaker sample boundaries.
-                for _ in range(12):
-                    chunk = self.buffer.take(RATE)
-                    if chunk is None:
-                        break
-                    chunks.append(chunk)
-                if not chunks:
-                    continue
-                # The Live clock already received digital silence while waiting.
-                # Replaying empty audio adds delay and irrelevant unknown contexts.
-                if not any(any(c.pcm) for c in chunks):
-                    self.available.set()
-                    continue
-                await self.gate.prepare(connection, chunks)
-                self.drained.clear()
-                self.playable.append(b"".join(c.pcm for c in chunks))
-                self.available.set()
-                if captions:
-                    identities = list(dict.fromkeys(c.speaker or "unknown" for c in chunks))
-                    report(
-                        f"\n[Attributed input {chunks[0].start / RATE:.2f}–"
-                        f"{chunks[-1].end / RATE:.2f}s: " + ", ".join(identities) + "]\n"
-                    )
+                while self.buffer.resolved >= self.prepared + RATE:
+                    index = self.prepared // RATE
+                    end = self.prepared + RATE
+                    chunks = []
+                    while self.buffer.released < end:
+                        chunks.append(self.buffer.take(end - self.buffer.released))
+                    if len(chunks) > 12:
+                        # Excessively fragmented/overlapping intervals cannot be
+                        # summarized into a single reliable identity.
+                        chunks = [
+                            AttributedAudio(
+                                self.prepared, end, None, b"".join(c.pcm for c in chunks)
+                            )
+                        ]
+                    anchors = []
+                    for start, stop, text in self.words:
+                        if start < end and stop > self.prepared:
+                            labels = {c.speaker for c in chunks if c.start < stop and c.end > start}
+                            name = next(iter(labels)) if len(labels) == 1 else None
+                            anchors.append([name or "unknown", text])
+                    self.words = [w for w in self.words if w[1] > end]
+                    self.prepared = end
+                    group.create_task(prepare(index, chunks, anchors[:12]))
 
         async with asyncio.TaskGroup() as group:
             group.create_task(upload())
             group.create_task(receive_labels())
-            group.create_task(release())
+            group.create_task(schedule(group))
 
     async def close(self):
         if self.connection_context is not None:
             await self.connection_context.__aexit__(None, None, None)
             self.connection_context = None
         self.websocket = None
-        self.playable.clear()
+        self.batches.clear()
+        self.words.clear()
+        self.gates.clear()

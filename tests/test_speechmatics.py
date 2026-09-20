@@ -58,7 +58,6 @@ def test_streaming_pipeline_never_releases_pcm_before_provider_and_live_ack():
     import json
     from types import SimpleNamespace as NS
 
-    from combadge.audio import FRAME_BYTES
     from combadge.speechmatics import StreamingSpeakerInput
 
     async def scenario():
@@ -66,14 +65,12 @@ def test_streaming_pipeline_never_releases_pcm_before_provider_and_live_ack():
         events = asyncio.Queue()
         sent = []
         context_ready = asyncio.Event()
-        audio_uploaded = asyncio.Event()
 
         async def recv():
             return json.dumps(await events.get())
 
         async def upload(pcm):
-            assert pcm == b"\x01\x00" * (FRAME_BYTES // 2)
-            audio_uploaded.set()
+            pass
 
         async def context(message):
             sent.append(message)
@@ -81,26 +78,29 @@ def test_streaming_pipeline_never_releases_pcm_before_provider_and_live_ack():
 
         pipeline.websocket = NS(send=upload, recv=recv)
         worker = asyncio.create_task(pipeline.run(NS(send=context), lambda _: None))
-        pcm = b"\x01\x00" * (FRAME_BYTES // 2)
+        pcm = b"\x01\x00" * RATE
         try:
             pipeline.feed(pcm)
-            await asyncio.wait_for(audio_uploaded.wait(), 1)
-            assert pipeline.frame(FRAME_BYTES) == bytes(FRAME_BYTES)
+            assert pipeline.frame(RATE * 2) == bytes(RATE * 2)
             message = transcript("Edmon")
-            message["metadata"]["end_time"] = 0.02
-            message["results"][0].update(start_time=0, end_time=0.02)
+            message["metadata"]["end_time"] = 1
+            message["results"][0].update(start_time=0, end_time=1)
+            message["results"][0]["alternatives"][0]["content"] = "Computer"
             await events.put(message)
             await asyncio.wait_for(context_ready.wait(), 1)
-            assert pipeline.frame(FRAME_BYTES) == bytes(FRAME_BYTES)
+            assert not pipeline.batches[0]["ready"]
+            assert "Computer" in sent[0]["content"]
             pipeline.observe(
                 NS(type="session.thinking.appended", client_event_id=sent[0]["event_id"])
             )
             for _ in range(5):
                 await asyncio.sleep(0)
-                if pipeline.playable:
-                    break
-            assert pipeline.frame(FRAME_BYTES) == pcm
-            assert pipeline.frame(FRAME_BYTES) == bytes(FRAME_BYTES)
+            assert pipeline.batches[0]["ready"]
+            # Four more seconds of clock input precede the scheduled original PCM.
+            for _ in range(4):
+                assert pipeline.frame(RATE * 2) == bytes(RATE * 2)
+            assert pipeline.frame(RATE * 2) == pcm
+            assert 0 not in pipeline.batches
         finally:
             worker.cancel()
             await asyncio.gather(worker, return_exceptions=True)
@@ -117,7 +117,7 @@ def test_late_provider_results_expire_to_unknown_without_previous_name():
     pipeline.feed(b"\x01\x00" * RATE)
     pipeline.buffer.resolve(RATE, [SpeakerSpan(0, RATE, "Edmon")])
     assert pipeline.buffer.take(RATE).speaker == "Edmon"
-    pipeline.feed(b"\x02\x00" * (RATE * 5))
+    pipeline.feed(b"\x02\x00" * (RATE * 3))
     assert pipeline.buffer.take(RATE).speaker is None
     assert pipeline.buffer.take(RATE) is None
 
@@ -157,5 +157,80 @@ def test_transient_startup_quota_retries_but_active_session_never_replays(monkey
         sleep.assert_awaited_once_with(5)
         rejected.close.assert_awaited_once()
         accepted.close.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("provider_delay_ticks", [50, 160])
+def test_long_conversation_has_fixed_latency_and_bounded_memory(provider_delay_ticks):
+    import asyncio
+    import json
+    from types import SimpleNamespace as NS
+
+    from combadge.audio import FRAME_BYTES
+    from combadge.speechmatics import StreamingSpeakerInput
+
+    async def scenario():
+        pipeline = StreamingSpeakerInput(
+            "private", [NS(name="Edmon"), NS(name="Samuel")], profiles=[]
+        )
+        events = asyncio.Queue()
+        pending_results, pending_acks, originals = [], [], []
+        tick = 0
+        sent_samples = 0
+        seen_context = []
+
+        async def upload(pcm):
+            nonlocal sent_samples
+            sent_samples += len(pcm) // 2
+            if sent_samples % RATE == 0:
+                second = sent_samples // RATE
+                label = "Edmon" if second <= 15 else "Samuel" if second <= 30 else "S1"
+                message = transcript(label)
+                message["metadata"]["end_time"] = second
+                message["results"][0].update(start_time=second - 1, end_time=second)
+                message["results"][0]["alternatives"][0]["content"] = "hello"
+                pending_results.append((tick + provider_delay_ticks, message))
+
+        async def recv():
+            return json.dumps(await events.get())
+
+        async def context(message):
+            seen_context.append(message)
+            pending_acks.append((tick + 40, message["event_id"]))  # 800 ms acknowledgment.
+
+        pipeline.websocket = NS(send=upload, recv=recv)
+        worker = asyncio.create_task(pipeline.run(NS(send=context), lambda _: None, captions=False))
+        try:
+            for tick in range(50 * 45):
+                pcm = (1 + tick % 30000).to_bytes(2, "little") * (FRAME_BYTES // 2)
+                originals.append(pcm)
+                pipeline.feed(pcm)
+                for due, message in pending_results[:]:
+                    if due <= tick:
+                        pending_results.remove((due, message))
+                        await events.put(message)
+                for due, event_id in pending_acks[:]:
+                    if due <= tick:
+                        pending_acks.remove((due, event_id))
+                        pipeline.observe(
+                            NS(type="session.thinking.appended", client_event_id=event_id)
+                        )
+                for _ in range(5):
+                    await asyncio.sleep(0)
+                if worker.done():
+                    worker.result()
+                expected = bytes(FRAME_BYTES) if tick < 250 else originals[tick - 250]
+                assert pipeline.frame(FRAME_BYTES) == expected
+                assert len(pipeline.batches) <= 5
+                assert pipeline.buffer.received - pipeline.buffer.released <= 3 * RATE
+            joined = " ".join(m["content"] for m in seen_context)
+            if provider_delay_ticks == 50:
+                assert "Edmon" in joined and "Samuel" in joined
+            else:
+                assert "Edmon" not in joined and "Samuel" not in joined
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
 
     asyncio.run(scenario())
