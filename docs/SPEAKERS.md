@@ -13,13 +13,15 @@ python -m pip install --no-deps -e .
 
 Prepare one clean, single-person WAV reference for each speaker: 2–10 seconds, PCM16, mono or stereo, 8–96 kHz. The application uses the first four seconds (or the whole clip if shorter), mixes stereo to mono, and preserves the sample rate. This keeps reference uploads below the API form-part size limit. Choose clearly audible speech from the start, with no other voices or music. Use recordings the speakers have agreed to enroll. Keep them outside source control; WAV files and `recordings/` are ignored by Git. No persistent voice profile is created remotely by this application.
 
-Add these options to your normal `combadge voice` command:
+Start the Pi with Bluetooth replies and enrolled speakers:
 
 ```sh
---speaker Edmon=/path/to/edmon.wav --speaker Samuel=/path/to/samuel.wav
+combadge start \
+  --speaker Edmon=recordings/edmon.wav \
+  --speaker Samuel=recordings/samuel.wav
 ```
 
-Up to four unique names are supported. References are loaded before the microphone opens. `--speaker` cannot be combined with `--check` or `--list-devices`.
+Up to four unique names are supported. Relative paths resolve from the directory where you run the command, including across Bluetooth's sudo handoff. References are validated before Bluetooth starts or the microphone opens. The same options work with `combadge voice`. `--speaker` cannot be combined with `--tone`, `--check`, or `--list-devices`.
 
 For QNX, retain the command audio interface:
 

@@ -1,9 +1,16 @@
 """Start microphone, camera, Bluetooth replies, and human calling."""
 
-from argparse import BooleanOptionalAction
+from argparse import ArgumentTypeError, BooleanOptionalAction
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def speaker_reference(value):
+    name, separator, path = value.partition("=")
+    if not separator or not name or not path:
+        raise ArgumentTypeError("use NAME=FILE.wav for each --speaker")
+    return f"{name}={Path(path).expanduser().resolve()}"
 
 
 def add_arguments(parser):
@@ -12,6 +19,14 @@ def add_arguments(parser):
 
     parser.add_argument("--env-file", type=Path, default=ROOT / ".env")
     parser.add_argument("--input-device", default="default")
+    parser.add_argument(
+        "--speaker",
+        action="append",
+        type=speaker_reference,
+        default=[],
+        metavar="NAME=FILE.wav",
+        help="enable speaker identification with a 2–10s reference; repeat for up to four people",
+    )
     camera_unit = next((unit for unit in (3, 4) if Path(f"/dev/sensor/camera{unit}").exists()), 4)
     parser.add_argument("--camera-unit", type=int, default=camera_unit)
     parser.add_argument("--no-camera", action="store_true")
@@ -76,6 +91,10 @@ def shopping_arguments(args):
     return command
 
 
+def speaker_arguments(args):
+    return [item for reference in args.speaker for item in ("--speaker", reference)]
+
+
 def launch(args):
     if args.bluetooth or args.tone:
         from combadge.bluetooth_startup import launch as bluetooth
@@ -100,6 +119,7 @@ def launch(args):
         command.extend(["--save-snapshots", str(args.save_snapshots.expanduser().resolve())])
     command.append("--calls" if args.calls else "--no-calls")
     command.extend(shopping_arguments(args))
+    command.extend(speaker_arguments(args))
     print(
         "Starting microphone and camera; replies appear in this console. Ctrl+C stops.", flush=True
     )

@@ -196,7 +196,9 @@ def test_bluetooth_app_receives_call_preference(tmp_path, monkeypatch, enabled):
     os.mkfifo(driver / "audio.pcm")
     parser = argparse.ArgumentParser()
     add_arguments(parser)
-    args = parser.parse_args(["--bluetooth-dir", str(driver)])
+    args = parser.parse_args(
+        ["--bluetooth-dir", str(driver), "--speaker", f"Edmon={tmp_path / 'edmon.wav'}"]
+    )
     args.calls = enabled
     monkeypatch.setenv("SUDO_USER", "qnxuser")
     app = Mock(returncode=0)
@@ -217,3 +219,57 @@ def test_bluetooth_app_receives_call_preference(tmp_path, monkeypatch, enabled):
     command = launch_app.call_args.args[0]
     assert ("--calls" if enabled else "--no-calls") in command
     assert ("--no-calls" if enabled else "--calls") not in command
+    assert command[command.index("--speaker") + 1] == f"Edmon={tmp_path / 'edmon.wav'}"
+
+
+def test_enrollment_survives_sudo_directory_change_and_reaches_voice(tmp_path, monkeypatch):
+    import argparse
+
+    from combadge.speakers import pcm_wav
+    from combadge.startup import add_arguments
+
+    monkeypatch.chdir(tmp_path)
+    references = ["Edmon=edmon reference.wav", "Samuel=samuel.wav"]
+    for reference in references:
+        (tmp_path / reference.partition("=")[2]).write_bytes(pcm_wav(b"\x01\x00" * 48000))
+    with (
+        patch("combadge.bluetooth_startup.platform.system", return_value="QNX"),
+        patch("combadge.bluetooth_startup.os.geteuid", return_value=1000),
+        patch("combadge.bluetooth_startup.os.execvp", side_effect=SystemExit) as execute,
+        pytest.raises(SystemExit),
+    ):
+        main(["start", "--speaker", references[0], "--speaker", references[1]])
+    command = execute.call_args.args[1]
+    monkeypatch.chdir(tmp_path.parent)
+    parser = argparse.ArgumentParser()
+    add_arguments(parser)
+    args = parser.parse_args(command[command.index("combadge.bluetooth_startup") + 1 :])
+    expected = [f"{name}={tmp_path / path}" for name, path in (s.split("=", 1) for s in references)]
+    assert args.speaker == expected
+    args.bluetooth = False
+    with patch("combadge.cli.main", return_value=0) as voice:
+        launch(args)
+    voice_command = voice.call_args.args[0]
+    assert [
+        voice_command[i + 1] for i, arg in enumerate(voice_command) if arg == "--speaker"
+    ] == expected
+
+
+@pytest.mark.parametrize("reference", ["Edmon", "=file.wav", "Edmon="])
+def test_start_rejects_malformed_reference_before_launch(reference):
+    with patch("combadge.startup.launch") as launch_start, pytest.raises(SystemExit) as error:
+        main(["start", "--speaker", reference])
+    assert error.value.code == 2
+    launch_start.assert_not_called()
+
+
+@pytest.mark.parametrize("tone", [False, True])
+def test_invalid_enrollment_never_starts_bluetooth(tmp_path, tone):
+    options = ["--tone"] if tone else []
+    with (
+        patch("combadge.bluetooth_startup.os.execvp") as sudo,
+        patch("combadge.bluetooth_startup.run") as radio,
+    ):
+        assert main(["start", *options, "--speaker", f"Edmon={tmp_path / 'missing.wav'}"]) == 2
+    sudo.assert_not_called()
+    radio.assert_not_called()

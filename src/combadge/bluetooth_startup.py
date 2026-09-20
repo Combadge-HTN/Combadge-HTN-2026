@@ -158,7 +158,7 @@ def idle_pins():
 
 
 def run(args):
-    from combadge.startup import shopping_arguments
+    from combadge.startup import shopping_arguments, speaker_arguments
 
     if platform.system() != "QNX" or os.geteuid() != 0 or not os.environ.get("SUDO_USER"):
         raise RuntimeError("Run combadge start on the QNX Pi as qnxuser (it invokes sudo)")
@@ -249,6 +249,7 @@ def run(args):
                         command.extend(["--save-snapshots", str(args.save_snapshots)])
                     command.append("--calls" if args.calls else "--no-calls")
                     command.extend(shopping_arguments(args))
+                    command.extend(speaker_arguments(args))
                 print("Speaker stream ready. Starting test… Ctrl+C stops everything.", flush=True)
                 app = subprocess.Popen(
                     ["sudo", "-u", user, "--", *command],
@@ -284,7 +285,18 @@ def run(args):
 
 
 def launch(args):
-    from combadge.startup import shopping_arguments
+    from combadge.startup import shopping_arguments, speaker_arguments
+
+    if args.speaker:
+        from combadge.speakers import load_references
+
+        try:
+            if args.tone:
+                raise ValueError("--speaker requires a voice session, not --tone")
+            load_references(args.speaker)
+        except (OSError, ValueError) as error:
+            print(f"Cannot load speaker references: {error}", file=sys.stderr)
+            return 2
 
     if args.max_seconds <= 0:
         print("--max-seconds must be positive", file=sys.stderr)
@@ -316,6 +328,7 @@ def launch(args):
         if args.tone:
             command.append("--tone")
         command.append("--calls" if args.calls else "--no-calls")
+        command.extend(speaker_arguments(args))
         shopping = shopping_arguments(args)
         command.extend(shopping)
         if "--shopify" not in shopping:
