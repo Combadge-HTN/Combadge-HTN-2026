@@ -62,13 +62,38 @@ def final_spans(message, names):
     return end, spans
 
 
+class SpeechmaticsError(RuntimeError):
+    def __init__(self, category):
+        self.category = category
+        super().__init__(f"Speechmatics rejected the recognition session ({category})")
+
+
 async def receive(websocket):
     message = json.loads(await websocket.recv())
     if not isinstance(message, dict):
         raise RuntimeError("Invalid Speechmatics response")
     if message.get("message") == "Error":
         # Server reason text can contain request material. Keep errors credential-safe.
-        raise RuntimeError("Speechmatics rejected the recognition session")
+        kind = message.get("type")
+        known_errors = {
+            "invalid_message",
+            "invalid_model",
+            "invalid_language",
+            "invalid_config",
+            "invalid_audio_type",
+            "invalid_output_format",
+            "not_authorised",
+            "not_allowed",
+            "job_error",
+            "protocol_error",
+            "quota_exceeded",
+            "timelimit_exceeded",
+            "idle_timeout",
+            "session_timeout",
+            "unknown_error",
+        }
+        kind = kind if kind in known_errors else "unknown_error"
+        raise SpeechmaticsError(kind)
     return message
 
 
@@ -76,19 +101,38 @@ async def receive(websocket):
 async def session(api_key, config):
     from websockets.asyncio.client import connect
 
-    async with connect(
-        URL,
-        additional_headers={"Authorization": "Bearer " + api_key},
-        open_timeout=15,
-        close_timeout=1,
-        max_size=2_000_000,
-        max_queue=16,
-    ) as websocket:
-        await websocket.send(json.dumps(config))
-        async with asyncio.timeout(20):
-            while (await receive(websocket)).get("message") != "RecognitionStarted":
-                pass
+    # The service documents a 5–10 second retry interval for these startup errors.
+    # Enrollment can briefly retain a slot after EndOfTranscript/socket close.
+    # Never retry after yielding: replaying a running conversation is not safe.
+    for attempt in range(3):
+        websocket = await connect(
+            URL,
+            additional_headers={"Authorization": "Bearer " + api_key},
+            open_timeout=15,
+            close_timeout=1,
+            max_size=2_000_000,
+            max_queue=16,
+        )
+        try:
+            await websocket.send(json.dumps(config))
+            async with asyncio.timeout(20):
+                while (await receive(websocket)).get("message") != "RecognitionStarted":
+                    pass
+        except BaseException as error:
+            await websocket.close()
+            if (
+                isinstance(error, SpeechmaticsError)
+                and error.category in {"quota_exceeded", "job_error"}
+                and attempt < 2
+            ):
+                await asyncio.sleep(5)
+                continue
+            raise
+        break
+    try:
         yield websocket
+    finally:
+        await websocket.close()
 
 
 async def enroll(api_key, reference):

@@ -120,3 +120,42 @@ def test_late_provider_results_expire_to_unknown_without_previous_name():
     pipeline.feed(b"\x02\x00" * (RATE * 5))
     assert pipeline.buffer.take(RATE).speaker is None
     assert pipeline.buffer.take(RATE) is None
+
+
+def test_transient_startup_quota_retries_but_active_session_never_replays(monkeypatch):
+    import asyncio
+    import json
+    from types import SimpleNamespace as NS
+    from unittest.mock import AsyncMock
+
+    from combadge.speechmatics import SpeechmaticsError, session
+
+    async def scenario():
+        rejected = NS(
+            send=AsyncMock(),
+            close=AsyncMock(),
+            recv=AsyncMock(
+                return_value=json.dumps(
+                    {"message": "Error", "type": "quota_exceeded", "reason": "private details"}
+                )
+            ),
+        )
+        accepted = NS(
+            send=AsyncMock(),
+            close=AsyncMock(),
+            recv=AsyncMock(return_value=json.dumps({"message": "RecognitionStarted"})),
+        )
+        connect = AsyncMock(side_effect=[rejected, accepted])
+        sleep = AsyncMock()
+        monkeypatch.setattr("websockets.asyncio.client.connect", connect)
+        monkeypatch.setattr("combadge.speechmatics.asyncio.sleep", sleep)
+        with pytest.raises(SpeechmaticsError):
+            async with session("secret", recognition_config()) as ws:
+                assert ws is accepted
+                raise SpeechmaticsError("quota_exceeded")
+        assert connect.await_count == 2
+        sleep.assert_awaited_once_with(5)
+        rejected.close.assert_awaited_once()
+        accepted.close.assert_awaited_once()
+
+    asyncio.run(scenario())
