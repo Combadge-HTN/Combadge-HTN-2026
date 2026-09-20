@@ -4,7 +4,7 @@ Combadge can place a phone call to a configured contact and carry the user's
 speech directly. The other person answers an ordinary phone. A voice-initiated
 call closes the GPT-Live session and its connection before dialing. The phone
 conversation then runs independently, with no audio sent to OpenAI. After confirmed
-hang-up, voice-initiated calls reconnect to GPT-Live with recent assistant context.
+hang-up, the assistant stays off until explicitly activated again.
 Ctrl+C exits without reconnecting. The standalone `call` command still exits after
 the call and needs no OpenAI key.
 
@@ -117,10 +117,9 @@ combadge voice --calls --audio-backend commands \
 ```
 
 The named contact must be unambiguous. A failed call is not automatically redialed.
-The other person can hang up, returning voice-initiated calls to a new GPT-Live
-session after confirmed termination. Ctrl+C ends the call and exits the command
-without reconnecting. Standalone calls still exit after hang-up. Recent assistant
-conversation and tool results are carried forward, but phone-call audio is not.
+The other person can hang up. Once termination is confirmed, the command exits
+with the assistant off. Explicitly activate it again for another voice session.
+Ctrl+C also ends the call and exits. Phone-call audio is never sent to GPT-Live.
 A physical hang-up button and spoken hang-up detection during calls are not
 implemented. Call speech bypasses the AI, including a spoken “hang up.”
 Use headphones or hardware echo cancellation to avoid speaker feedback.
