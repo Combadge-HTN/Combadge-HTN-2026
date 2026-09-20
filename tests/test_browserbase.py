@@ -165,7 +165,11 @@ def test_network_errors_hide_secrets(error):
     assert "private-key" not in str(e.value)
 
 
-@pytest.mark.parametrize("raw", [b"not json", b"[]", b"\xff", b"a" * (MAX_RESPONSE_BYTES + 1)])
+@pytest.mark.parametrize(
+    "raw",
+    [b"not json", b"[]", b"\xff", b"a" * (MAX_RESPONSE_BYTES + 1)],
+    ids=["invalid-json", "wrong-shape", "invalid-utf8", "oversized"],
+)
 def test_invalid_or_oversized_api_response_is_rejected(raw):
     opener = Mock()
     opener.open.return_value = io.BytesIO(raw)
