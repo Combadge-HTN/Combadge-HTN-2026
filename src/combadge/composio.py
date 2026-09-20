@@ -8,6 +8,7 @@ import urllib.request
 
 from combadge.config import Settings
 from combadge.gmail import GmailReader
+from combadge.merchant import MerchantInventory
 
 API_URL = "https://backend.composio.dev/api/v3.1"
 REQUEST_TIMEOUT = 20
@@ -16,7 +17,8 @@ MAX_RESULT_CHARS = 24000
 MAX_SCHEMA_CHARS = 32000
 MAX_EXECUTIONS = 16
 
-# Explicitly scoped app operations. Browserbase, Shopify and calling stay native.
+# General app actions. Merchant inventory uses fixed queries in merchant.py;
+# arbitrary Shopify GraphQL is deliberately absent from this action allowlist.
 READ_TOOLS = {
     "gmail": {
         "GMAIL_FETCH_EMAILS",
@@ -57,6 +59,7 @@ WRITE_TOOLS = {
     },
 }
 TOOL_APPS = {slug: app for app in READ_TOOLS for slug in READ_TOOLS[app] | WRITE_TOOLS[app]}
+CONNECTED_APPS = (*READ_TOOLS, "shopify")
 
 
 def function(name, description, properties):
@@ -194,10 +197,16 @@ class ComposioClient:
         self._uncertain = set()
         self._executions = {}
         self.gmail = GmailReader(self._gmail_tool)
+        self.merchant = None
 
     @classmethod
     def from_settings(cls, settings: Settings):
-        return cls(settings.composio_api_key, settings.composio_user_id, settings.composio_accounts)
+        client = cls(
+            settings.composio_api_key, settings.composio_user_id, settings.composio_accounts
+        )
+        if settings.shopify_merchant_domain:
+            client.merchant = MerchantInventory(client, settings.shopify_merchant_domain)
+        return client
 
     def require_user(self):
         if not self.user_id:
@@ -246,7 +255,7 @@ class ComposioClient:
 
     async def connected_accounts(self):
         """Return only account metadata, never OAuth state or connection credentials."""
-        query = {"toolkit_slugs": list(READ_TOOLS), "limit": 100}
+        query = {"toolkit_slugs": list(CONNECTED_APPS), "limit": 100}
         if self.user_id:
             query["user_ids"] = [self.user_id]
         accounts = []
@@ -255,7 +264,7 @@ class ComposioClient:
             result = await self._api("GET", "/connected_accounts", query=query)
             for account in result.get("items", []):
                 app = account.get("toolkit", {}).get("slug")
-                if not isinstance(app, str) or app not in READ_TOOLS:
+                if not isinstance(app, str) or app not in CONNECTED_APPS:
                     continue
                 if self.user_id and account.get("user_id") != self.user_id:
                     continue
@@ -301,7 +310,7 @@ class ComposioClient:
         self.require_user()
         accounts = await self.connected_accounts()
         result = {}
-        for app in READ_TOOLS:
+        for app in CONNECTED_APPS:
             try:
                 result[app] = {"status": "ACTIVE", "account_id": self.select_account(app, accounts)}
             except RuntimeError as error:

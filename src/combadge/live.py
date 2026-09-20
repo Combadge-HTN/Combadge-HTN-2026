@@ -349,6 +349,12 @@ def session_config(
         )
         backend.setdefault("tools", []).extend(COMPOSIO_TOOLS)
         backend["parallel_tool_calls"] = False
+        if settings.shopify_merchant_domain:
+            from combadge.merchant import MERCHANT_INSTRUCTIONS, MERCHANT_TOOLS
+
+            config["instructions"] += MERCHANT_INSTRUCTIONS
+            backend["instructions"] += MERCHANT_INSTRUCTIONS
+            backend["tools"].extend(MERCHANT_TOOLS)
     if sms_names is not None:
         contact_instructions = sms_contact_instructions(sms_names)
         config["instructions"] += LIVE_SMS_INSTRUCTIONS + contact_instructions

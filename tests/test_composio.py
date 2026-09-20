@@ -131,7 +131,7 @@ def test_status_reports_missing_apps_without_hiding_other_connections():
         client = ComposioClient("key", "wearer")
         client._api = AsyncMock(return_value={"items": [account()]})
         status = await client.connection_status()
-        assert set(status) == {"gmail", "googlecalendar"}
+        assert set(status) == {"gmail", "googlecalendar", "shopify"}
         assert status["gmail"]["status"] == "ACTIVE"
         assert status["googlecalendar"]["status"] == "unavailable"
         assert client._api.await_count == 1
