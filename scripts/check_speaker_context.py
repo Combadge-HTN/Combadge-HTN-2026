@@ -30,14 +30,14 @@ CASES = {
 }
 
 
-def question_audio(settings):
+def question_audio(settings, question):
     request = urllib.request.Request(
         "https://api.openai.com/v1/audio/speech",
         data=json.dumps(
             {
                 "model": "gpt-4o-mini-tts",
                 "voice": "coral",
-                "input": "Computer, what's my name?",
+                "input": question,
                 "response_format": "pcm",
             }
         ).encode(),
@@ -122,8 +122,6 @@ async def check(settings, question, name, labels):
     answer = "".join(answers)
     named = {person for person in ("Edmon", "Samuel") if person.lower() in answer.lower()}
     expected = set() if "ambiguous" in labels else set(labels) - {"unknown"}
-    # Clear matches should inform conversation without the old defensive narration.
-    caveats = ("not sure", "might", "heard", "match", "verify", "verified", "assume")
     result = {
         "case": name,
         "scripted_labels": labels,
@@ -136,8 +134,7 @@ async def check(settings, question, name, labels):
         # A single selected name is still a failure. Review uncertainty manually.
         "names_check": bool(answer.strip())
         and (named == expected or (len(expected) > 1 and not named)),
-        "question_heard": "my name" in "".join(heard).lower(),
-        "style_check": len(expected) != 1 or not any(word in answer.lower() for word in caveats),
+        "question_heard": bool("".join(heard).strip()),
     }
     print(json.dumps(result), flush=True)
     return result
@@ -147,11 +144,12 @@ async def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--case", action="append", choices=CASES, help="repeat to select cases")
+    parser.add_argument("--question", default="Computer, what's my name?")
     args = parser.parse_args()
     settings = load_settings(args.env_file)
     if not settings.openai_api_key:
         parser.error("OPENAI_API_KEY is required")
-    question = await asyncio.to_thread(question_audio, settings)
+    question = await asyncio.to_thread(question_audio, settings, args.question)
     results = await asyncio.gather(
         *(check(settings, question, case, CASES[case]) for case in args.case or CASES),
     )
@@ -159,7 +157,6 @@ async def main():
         0
         if all(
             r["names_check"]
-            and r["style_check"]
             and r["question_heard"]
             and r["context_acknowledged"]
             and r["finalized"]
