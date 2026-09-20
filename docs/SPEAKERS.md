@@ -74,6 +74,12 @@ a two-minute conversation without buffer overflow. Recorded tests have also exer
 enrolled speaker changes and an unenrolled synthetic voice. These do not establish
 accuracy for every voice, short interjection, overlapping speaker, or speaker echo.
 
+The speaker-on QNX test currently fails the echo check: assistant playback re-enters
+the microphone as unknown speech and can trigger repeated or contradictory replies.
+This occurred with Speex enabled. Muted microphone and recorded-input successes do
+not establish acceptance with the speaker playing; the echo path must be corrected
+and the conversational test repeated before this mode is considered ready.
+
 Replay consented test clips through both services without opening audio devices:
 
 ```sh
