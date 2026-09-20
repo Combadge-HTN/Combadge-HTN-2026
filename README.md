@@ -276,11 +276,52 @@ offsets for `read_gmail_message`. The assistant can open an individual message f
 follow-up questions and must report unavailable or incomplete content. These API
 reads do **not** mark emails read in Gmail; they leave mailbox labels unchanged.
 
-This add-on supports Gmail and Google Calendar only. It has no SMS tools, background
+The general connected-app actions support Gmail and Google Calendar. They have no SMS tools, background
 inbox monitoring, arbitrary Google app access, or email attachment-download tool.
 `status` checks connection metadata and `tools` checks discovery; neither proves
 all Google scopes work. Start with a read request in voice, then try a draft or
 calendar change you actually want. Reconnect in Composio if access expires.
+
+## Merchant inventory with Composio
+
+Connect the merchant's Shopify store in the same Composio project and under the same
+`COMPOSIO_USER_ID`. Shopify requires a custom OAuth app: create it in the Shopify
+Dev Dashboard, configure `read_products,read_inventory,read_locations`, and copy the
+exact callback URL shown in Composio's custom OAuth configuration. Enter the Shopify
+app credentials in Composio and complete the store's authorization flow. When asked
+for a subdomain, supply only the store name, without `.myshopify.com`.
+
+Set these values in the badge's `.env` after the connection is active:
+
+```dotenv
+SHOPIFY_MERCHANT_DOMAIN=your-store.myshopify.com
+COMPOSIO_SHOPIFY_ACCOUNT_ID=the-connected-account-id
+```
+
+The domain must match the connected store. The account ID is optional if that user
+has exactly one active Shopify connection. Inspect account owners and IDs with
+`combadge composio accounts`. Verify stock access without opening an audio session:
+
+```bash
+combadge merchant 'teapot'
+combadge merchant --variant-id 'gid://shopify/ProductVariant/123456789'
+```
+
+Use an ID returned by the first command. Results include the Composio execution log
+ID, lookup time, and pagination cursors (`--after`). A successful account-status check
+alone does not verify inventory access.
+
+Normal voice sessions enable merchant tools when the store domain and Composio
+credentials are configured. Say “Computer, check stock on this” with camera capture
+enabled, or name the product. It searches your catalog, resolves the variant and
+reads available, on-hand, committed and incoming quantities by location. Untracked
+inventory is unknown rather than zero. The consumer `--shopify` flow remains separate.
+
+For restocking, specify the exact item, quantity and supplier. “Draft a restock
+request for twenty” can use connected Gmail to save a draft once those details are
+resolved. The product vendor label alone does not identify a supplier email.
+This integration does not change inventory or create purchase orders; a saved
+email draft does not mean supplies were ordered.
 
 ## Image questions
 

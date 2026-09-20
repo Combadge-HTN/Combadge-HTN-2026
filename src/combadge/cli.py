@@ -175,6 +175,11 @@ def main(argv: list[str] | None = None) -> int:
     apps.add_argument("action", choices=("accounts", "status", "tools"))
     apps.add_argument("--app", choices=("gmail", "googlecalendar"))
     apps.add_argument("--env-file", type=Path, default=Path(".env"))
+    merchant = commands.add_parser("merchant", help="read your Shopify store's stock")
+    merchant.add_argument("query", nargs="?", default="", help="product name or Shopify search")
+    merchant.add_argument("--variant-id", help="read stock by location for an exact variant")
+    merchant.add_argument("--after", help="pagination cursor returned by a previous lookup")
+    merchant.add_argument("--env-file", type=Path, default=Path(".env"))
     texts = commands.add_parser("sms", help="send or read texts using the dedicated SMS number")
     texts.add_argument("--env-file", type=Path, default=Path(".env"))
     sms_commands = texts.add_subparsers(dest="sms_action", required=True)
@@ -405,6 +410,23 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("Speaker identification: off (no speaker references).", flush=True)
 
+    if args.command == "merchant":
+        try:
+            client = ComposioClient.from_settings(settings)
+            if client.merchant is None:
+                raise ValueError("Set SHOPIFY_MERCHANT_DOMAIN to your .myshopify.com hostname.")
+            if args.variant_id:
+                name = "get_merchant_stock"
+                arguments = {"variant_id": args.variant_id, "after": args.after}
+            else:
+                name = "search_merchant_products"
+                arguments = {"query": args.query, "after": args.after}
+            result = asyncio.run(client.merchant.execute(name, arguments))
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0 if result["status"] == "ok" else 1
+        except (OSError, ValueError, RuntimeError) as error:
+            parser.exit(1, f"Merchant inventory: {error}\n")
+
     if args.command == "composio":
         if args.action == "tools" and not args.app:
             parser.error("composio tools requires --app")
@@ -483,6 +505,8 @@ def main(argv: list[str] | None = None) -> int:
             if composio is not None:
                 composio.require_user()
                 print("Connected apps: Composio enabled (Gmail, Google Calendar).")
+                if composio.merchant is not None:
+                    print(f"Merchant inventory configured: {composio.merchant.domain}.")
             elif not args.check:
                 print(
                     "Connected apps: disabled (--no-composio)."

@@ -32,6 +32,7 @@ class Settings:
     shopify_agent_profile_url: str = SHOPIFY_PROFILE_URL
     shopify_country: str = "CA"
     shopify_currency: str = "CAD"
+    shopify_merchant_domain: str = ""
 
 
 def load_settings(env_file: Path = Path(".env")) -> Settings:
@@ -50,7 +51,7 @@ def load_settings(env_file: Path = Path(".env")) -> Settings:
         composio_user_id=value("COMPOSIO_USER_ID"),
         composio_accounts={
             app: account
-            for app in ("gmail", "googlecalendar")
+            for app in ("gmail", "googlecalendar", "shopify")
             if (account := value(f"COMPOSIO_{app.upper()}_ACCOUNT_ID"))
         },
         speaker_references=value("COMBADGE_SPEAKERS"),
@@ -64,4 +65,5 @@ def load_settings(env_file: Path = Path(".env")) -> Settings:
         shopify_agent_profile_url=value("SHOPIFY_AGENT_PROFILE_URL") or SHOPIFY_PROFILE_URL,
         shopify_country=value("SHOPIFY_COUNTRY") or "CA",
         shopify_currency=value("SHOPIFY_CURRENCY") or "CAD",
+        shopify_merchant_domain=value("SHOPIFY_MERCHANT_DOMAIN"),
     )

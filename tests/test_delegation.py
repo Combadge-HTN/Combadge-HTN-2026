@@ -50,6 +50,38 @@ class Connection:
             self.continued.set()
 
 
+def test_merchant_result_reaches_voice_backend_before_continuation():
+    async def scenario():
+        connection = Connection()
+        merchant = NS(
+            execute=AsyncMock(
+                return_value={
+                    "status": "ok",
+                    "log_id": "log_stock",
+                    "data": {"available": 0},
+                }
+            )
+        )
+        delegation = SnapshotDelegation(
+            connection, None, lambda _: None, composio=NS(merchant=merchant)
+        )
+        delegation.observe(event("response.created", response=NS(id="r1")))
+        arguments = {"variant_id": "gid://shopify/ProductVariant/42", "after": None}
+        delegation.observe(call(name="get_merchant_stock", arguments=json.dumps(arguments)))
+        delegation.observe(event("response.completed", response=NS(id="r1")))
+        worker = asyncio.create_task(delegation.run())
+        try:
+            await asyncio.wait_for(connection.continued.wait(), 1)
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+        merchant.execute.assert_awaited_once_with("get_merchant_stock", arguments, "d1")
+        assert json.loads(connection.messages[0]["item"]["output"])["log_id"] == "log_stock"
+        assert connection.messages[1] == {"type": "response.create"}
+
+    asyncio.run(scenario())
+
+
 async def execute_events(events, fail=False):
     connection, capture = Connection(), Capture(fail)
     delegation = SnapshotDelegation(connection, capture, lambda _: None)

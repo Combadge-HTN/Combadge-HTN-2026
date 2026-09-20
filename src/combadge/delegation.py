@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from combadge.browserbase import WEB_TOOL_NAMES, BrowserbaseClient
 from combadge.capture import SnapshotCapture
 from combadge.composio import COMPOSIO_TOOL_NAMES, ComposioClient
+from combadge.merchant import MERCHANT_TOOL_NAMES
 from combadge.shopify import ShoppingSession
 from combadge.sms import SMS_TOOL_NAMES, SmsClient
 from combadge.vision import ImageBudget
@@ -142,6 +143,14 @@ class SnapshotDelegation:
                         result = await self.web_lookup.execute(call.name, args, call.delegation_id)
                     elif call.name in COMPOSIO_TOOL_NAMES and self.composio is not None:
                         result = await self.composio.execute(call.name, args, call.delegation_id)
+                    elif (
+                        call.name in MERCHANT_TOOL_NAMES
+                        and self.composio is not None
+                        and self.composio.merchant is not None
+                    ):
+                        result = await self.composio.merchant.execute(
+                            call.name, args, call.delegation_id
+                        )
                     elif call.name in SMS_TOOL_NAMES and self.sms is not None:
                         result = await self.sms.execute(call.name, args, call.delegation_id)
                     elif self.shopping is not None:
