@@ -355,10 +355,11 @@ are configured. Startup reports the calling transport and, for SIP, contact name
 Use `--no-calls` to disable it or `--calls` to require valid calling configuration.
 Contact names and numbers are configured on the badge.
 
-The assistant disconnects during the human call and reconnects after confirmed
-hang-up or an unanswered/busy call. Recent conversation and tool results carry
-forward; phone-call audio stays outside the assistant. Ctrl+C ends the whole
-command. Standalone `combadge call` exits after the call.
+The assistant disconnects before dialing and stays off after the call ends,
+including busy, unanswered, and failed attempts. Explicitly toggle the assistant
+on again to resume; when running from the terminal, start a new `combadge start`
+session. Phone-call audio stays outside the assistant. Ctrl+C ends the whole
+command. Standalone `combadge call` also exits after the call.
 
 The badge connects directly to Twilio using TLS and encrypted SRTP audio; no relay
 server or tunnel is required. It keeps its 24 kHz PCM helpers and handles telephone

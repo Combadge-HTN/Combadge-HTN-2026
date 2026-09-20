@@ -99,20 +99,12 @@ result and continues the backend response. Dialing requires OpenAI's final
 The other person can hang up; Ctrl+C or the configured duration limit also ends
 the call. A pending call sends SIP CANCEL, an answered call sends BYE, and an
 answer racing cancellation is acknowledged and then ended. Calls are never
-redialed automatically. Voice-initiated calls return to GPT-Live after confirmed
-termination, including busy, unanswered and failed attempts with confirmed cleanup.
-The assistant says “Computer is back. How can I help?” and listens again. Ctrl+C
-ends the whole command and does not reconnect. Standalone `combadge call` still
-exits after the call. Spoken “hang up” and a physical hang-up button are not implemented.
+redialed automatically. After confirmed termination (including busy, unanswered,
+and failed attempts), the command returns with the assistant off. Only an explicit
+new activation starts another GPT-Live session. In the terminal, run `combadge start`
+again. Ctrl+C ends the whole command. Standalone `combadge call` also exits after
+the call. Spoken “hang up” and a physical hang-up button are not implemented.
 
-The new assistant session receives a bounded, in-memory history of recent
-conversation transcripts, tool results, and the call outcome. It receives no
-phone-call audio or transcript. Old actions are not replayed; the assistant waits
-for a new request. Older context may be omitted, and the initial image request is
-not rerun. SMS, calling, connected apps, and the other configured tools remain
-available. Each resumed assistant session gets the same `--max-seconds` limit.
-Reconnecting uses normal voice API credits. If reconnecting fails, the command
-reports the error and stops; it does not retry the phone call.
 
 TLS certificates are verified and unencrypted media is rejected. The supported
 media profile is PCMU with `AES_CM_128_HMAC_SHA1_80`, no MKI or key rotation.

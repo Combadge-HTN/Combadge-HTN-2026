@@ -20,6 +20,9 @@ class Settings:
     composio_api_key: str = field(default="", repr=False)
     composio_user_id: str = field(default="", repr=False)
     composio_accounts: dict[str, str] = field(default_factory=dict, repr=False)
+    echo_mode: str = "off"
+    echo_delay_ms: str = ""
+    echo_library: str = ""
     timezone: str = "America/Toronto"
     live_model: str = "gpt-live-1"
     live_voice: str = "marin"
@@ -47,6 +50,9 @@ def load_settings(env_file: Path = Path(".env")) -> Settings:
             for app in ("gmail", "googlecalendar")
             if (account := value(f"COMPOSIO_{app.upper()}_ACCOUNT_ID"))
         },
+        echo_mode=value("COMBADGE_AEC") or "off",
+        echo_delay_ms=value("COMBADGE_AEC_DELAY_MS"),
+        echo_library=value("COMBADGE_AEC_LIBRARY"),
         timezone=value("COMBADGE_TIMEZONE") or "America/Toronto",
         live_model=value("OPENAI_LIVE_MODEL") or "gpt-live-1",
         live_voice=value("OPENAI_LIVE_VOICE") or "marin",

@@ -135,8 +135,8 @@ LIVE_APP_INSTRUCTIONS = (
     "tools as needed. Wait for tool results before claiming an account is connected or an action "
     "succeeded. "
     "Distinguish message submission from delivery. Calls hand the phone to the USER; you cannot "
-    "speak to the recipient. The assistant reconnects after confirmed call termination; "
-    "wait for a new user request before resuming app work."
+    "speak to the recipient. The assistant stays off after call termination until "
+    "the user explicitly activates it again."
 )
 BACKEND_APP_INSTRUCTIONS = (
     " For Gmail searches/summaries use search_gmail_messages, which opens each message and "

@@ -68,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         "--max-seconds",
         type=positive_seconds,
         default=None,
-        help="limit per assistant session, including after calls (default: 300; check: 15/45)",
+        help="limit for this assistant session (default: 300; check: 15/45)",
     )
     voice.add_argument(
         "--no-web", action="store_true", help="disable automatic Browserbase online lookups"

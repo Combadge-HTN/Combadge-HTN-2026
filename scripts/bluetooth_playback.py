@@ -74,7 +74,7 @@ def main():
     try:
         # Reuse the driver's bounded FIFO writes, backpressure, and disconnect handling.
         # Slightly attenuate both assistant speech and phone audio before Bluetooth playback.
-        send_pcm(converted_input(gain=0.75))
+        send_pcm(converted_input(gain=0.60))
     except (OSError, ValueError, TimeoutError) as error:
         parser.exit(1, f"Bluetooth playback: {error}\n")
 
