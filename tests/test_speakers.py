@@ -284,7 +284,7 @@ def test_speaker_summary_preserves_uncertainty_and_reports_audio_age(names, expe
     labels = [dict(start=i, end=i + 1, speaker=name) for i, name in enumerate(names)]
     context = speaker_context(labels, len(names) + 3)
     assert expected in context
-    assert f"Name result: {status}:" in context
+    assert f"Attribution: {status}:" in context
     assert "Report ends 3.0s behind microphone input" in context
     assert json.dumps(labels, separators=(",", ":")) in context
 

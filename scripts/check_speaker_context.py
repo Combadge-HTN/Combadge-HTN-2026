@@ -130,7 +130,10 @@ async def check(settings, question, name, labels):
         "context_sent": tracker.published,
         "context_acknowledged": tracker.acknowledged,
         "finalized": stats.finalized,
-        "names_check": bool(answer.strip()) and named == expected,
+        # An uncertain multi-speaker answer need not recite all candidate names.
+        # A single selected name is still a failure. Review uncertainty manually.
+        "names_check": bool(answer.strip())
+        and (named == expected or (len(expected) > 1 and not named)),
         "question_heard": "my name" in "".join(heard).lower(),
     }
     print(json.dumps(result), flush=True)

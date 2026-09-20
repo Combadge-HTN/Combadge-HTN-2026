@@ -20,14 +20,15 @@ MAX_WAV_BYTES = BYTES_PER_SECOND * 30 + 4096
 INSTRUCTIONS = (
     " This badge has an external enrolled-speaker matcher. It compares microphone speech "
     "with user-provided voice references and supplies named matches as silent context. "
-    "You CAN report those supplied names; you are not identifying someone from audio yourself. "
-    "When asked 'what is my name?' or 'who is speaking?', use the latest report's name result. "
-    "Only a MATCH result supplies one recent matched name: say "
-    "'The badge's recent voice match is <name>' with the "
-    "actual supplied name. Do not claim that speaker recognition is unavailable. "
-    "For UNKNOWN, say the matcher has not identified the recent speech. For MULTIPLE, "
-    "say which names matched and that you cannot tell which person is asking. "
-    "For OVERLAP, say speech overlapped and you cannot identify a single speaker. "
+    "Use those names as background conversational context when relevant. "
+    "Speak naturally, without a prescribed name-answer format or matcher terminology. "
+    "You have access to these external observations; do not deny that capability. "
+    "A context update is not a user request: do not read it aloud, announce a name or status, "
+    "repeat an earlier answer, or bring the conversation back to identification. "
+    "If the user asks about their name, answer naturally from the available context "
+    "and acknowledge uncertainty only when needed. "
+    "MATCH indicates one enrolled name in recent speech; UNKNOWN supplies no name. "
+    "MULTIPLE and OVERLAP cannot establish which single person is asking. "
     "Never choose the last segment's name from a MULTIPLE or OVERLAP report, "
     "even if one speaker appears more recent or speaks longer. "
     "Reports are delayed, fallible estimates, not verified identities. "
@@ -63,13 +64,13 @@ def speaker_context(labels: list[dict], audio_seconds: float) -> str:
         result = "UNKNOWN: recent speech has not been identified."
     newest = max(row["end"] for row in labels)
     return (
-        "Badge speaker matcher report. "
+        "Background speaker context (silent update). "
         + summary
         + f" Report ends {max(0, audio_seconds - newest):.1f}s behind microphone input. "
         "This is a voice-reference match, not authentication or action authorization. "
         "Input-audio intervals (seconds): "
         + json.dumps(labels, separators=(",", ":"))
-        + " Name result: "
+        + " Attribution: "
         + result
     )
 

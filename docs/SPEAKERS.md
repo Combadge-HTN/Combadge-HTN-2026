@@ -45,7 +45,7 @@ Each result describes individual speech intervals, so two people speaking consec
 
 The worker sends a plain-language match summary and the complete analyzed window using `session.thinking.append`. Console output still omits repeated intervals, but that must not remove another speaker from the model's evidence. Offsets count input samples from the first microphone frame, not transcript event timestamps.
 
-When asked a name question, the assistant can report the badge's recent enrolled-voice match. It must distinguish that estimate from proof of who asked the current question. Unknown reports do not carry an earlier name forward; multiple names or overlap cannot identify a single speaker. Server acknowledgments confirm context acceptance, not that a particular reply used the label correctly.
+Speaker observations are background context, not a request to speak. The assistant can use a name naturally when relevant, with no prescribed answer wording. It must not announce label updates or repeat earlier answers when an update arrives. The estimates are not proof of who asked the current question. Unknown reports do not carry an earlier name forward; multiple names or overlap cannot identify a single speaker. Server acknowledgments confirm context acceptance, not that a particular reply used the label correctly.
 
 ## Uncertainty and failure handling
 
