@@ -80,8 +80,11 @@ def test_causal_headroom_is_applied_without_accepting_invalid_delay(monkeypatch)
             configured_echo(settings)
 
 
-def test_native_canceller_reduces_echo_and_preserves_near_end_speech(speex_library):
-    echo = SpeexEcho(speex_library)
+@pytest.mark.parametrize("residual_suppression", [False, True])
+def test_native_canceller_reduces_echo_and_preserves_near_end_speech(
+    speex_library, residual_suppression
+):
+    echo = SpeexEcho(speex_library, residual_suppression=residual_suppression)
     rng = random.Random(731)
     references = []
     raw_energy = clean_energy = near_energy = error_energy = 0
@@ -104,8 +107,22 @@ def test_native_canceller_reduces_echo_and_preserves_near_end_speech(speex_libra
                 raw_energy += sum(x * x for x in mic)
                 clean_energy += sum(x * x for x in output)
             if block >= 600:
-                near_energy += sum(x * x for x in near)
-                error_energy += sum((a - b) ** 2 for a, b in zip(output, near))
+                # The residual suppressor adds exactly one frame of latency.
+                expected = [
+                    round(
+                        1500
+                        * math.sin(
+                            2
+                            * math.pi
+                            * 731
+                            * ((block - int(residual_suppression)) * 480 + i)
+                            / 24000
+                        )
+                    )
+                    for i in range(480)
+                ]
+                near_energy += sum(x * x for x in expected)
+                error_energy += sum((a - b) ** 2 for a, b in zip(output, expected))
         assert 10 * math.log10(raw_energy / max(1, clean_energy)) > 15
         assert error_energy < 0.5 * near_energy
         with pytest.raises(ValueError):
@@ -117,7 +134,10 @@ def test_native_canceller_reduces_echo_and_preserves_near_end_speech(speex_libra
         echo.process(bytes(960), bytes(960))
 
 
-def test_native_cancellation_with_jittery_io_preserves_interruption(speex_library):
+@pytest.mark.parametrize("residual_suppression", [False, True])
+def test_native_cancellation_with_jittery_io_preserves_interruption(
+    speex_library, residual_suppression
+):
     rng = random.Random(894)
     far = [[rng.randint(-6000, 6000) for _ in range(480)] for _ in range(700)]
     now = [0.0]
@@ -127,7 +147,7 @@ def test_native_cancellation_with_jittery_io_preserves_interruption(speex_librar
         events.append((i * 0.02 + (0.009 if i % 3 else 0), "render", i))
         events.append(((i + 1) * 0.02 + (0.012 if i % 2 else 0), "capture", i))
     raw_energy = clean_energy = near_energy = error_energy = 0
-    echo = SpeexEcho(speex_library)
+    echo = SpeexEcho(speex_library, residual_suppression=residual_suppression)
     try:
         for at, kind, i in sorted(events):
             now[0] = at
@@ -147,8 +167,17 @@ def test_native_cancellation_with_jittery_io_preserves_interruption(speex_librar
                 raw_energy += sum(x * x for x in mic)
                 clean_energy += sum(x * x for x in out)
             if i >= 600:
-                near_energy += sum(x * x for x in near)
-                error_energy += sum((x - y) ** 2 for x, y in zip(out, near))
+                expected = [
+                    round(
+                        1500
+                        * math.sin(
+                            2 * math.pi * 731 * ((i - int(residual_suppression)) * 480 + j) / 24000
+                        )
+                    )
+                    for j in range(480)
+                ]
+                near_energy += sum(x * x for x in expected)
+                error_energy += sum((x - y) ** 2 for x, y in zip(out, expected))
         assert 10 * math.log10(raw_energy / max(1, clean_energy)) > 15
         assert error_energy < 0.5 * near_energy
     finally:

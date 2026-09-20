@@ -17,7 +17,15 @@ from combadge.audio import FRAME_BYTES, RATE
 
 
 class SpeexEcho:
-    def __init__(self, library=None, *, tail_ms=200):
+    """Linear cancellation followed by Speex's residual echo suppressor.
+
+    The suppressor adds one 20 ms frame of latency. It uses the echo estimate
+    from the canceller, rather than muting capture whenever the speaker plays.
+    """
+
+    def __init__(self, library=None, *, tail_ms=200, residual_suppression=True):
+        self.state = None
+        self.preprocessor = None
         path = library or ctypes.util.find_library("speexdsp")
         if not path:
             raise RuntimeError("SpeexDSP is missing; install the QNX speexdsp package")
@@ -39,6 +47,34 @@ class SpeexEcho:
         if self.lib.speex_echo_ctl(self.state, 24, ctypes.byref(rate)) != 0:
             self.close()
             raise RuntimeError("Could not configure echo cancellation sample rate")
+        if residual_suppression:
+            try:
+                self._init_preprocessor()
+            except BaseException:
+                self.close()
+                raise
+
+    def _init_preprocessor(self):
+        pointer = ctypes.c_void_p
+        self.lib.speex_preprocess_state_init.argtypes = [ctypes.c_int, ctypes.c_int]
+        self.lib.speex_preprocess_state_init.restype = pointer
+        self.lib.speex_preprocess_state_destroy.argtypes = [pointer]
+        self.lib.speex_preprocess_state_destroy.restype = None
+        self.lib.speex_preprocess_ctl.argtypes = [pointer, ctypes.c_int, pointer]
+        self.lib.speex_preprocess_ctl.restype = ctypes.c_int
+        self.lib.speex_preprocess_run.argtypes = [pointer, ctypes.POINTER(ctypes.c_int16)]
+        self.lib.speex_preprocess_run.restype = ctypes.c_int
+        self.preprocessor = self.lib.speex_preprocess_state_init(FRAME_BYTES // 2, RATE)
+        if not self.preprocessor:
+            raise RuntimeError("Could not allocate residual echo suppressor")
+        # SPEEX_PREPROCESS_SET_ECHO_STATE takes the echo-state pointer itself.
+        if self.lib.speex_preprocess_ctl(self.preprocessor, 24, self.state) != 0:
+            raise RuntimeError("Could not link residual echo suppression")
+        # This feature removes speaker echo, not steady near-end sounds. Keep
+        # the generic noise-suppression floor at 0 dB so those remain audible.
+        noise_floor = ctypes.c_int(0)  # SPEEX_PREPROCESS_SET_NOISE_SUPPRESS
+        if self.lib.speex_preprocess_ctl(self.preprocessor, 18, ctypes.byref(noise_floor)) != 0:
+            raise RuntimeError("Could not configure residual echo suppression")
 
     def process(self, captured, reference):
         if not self.state:
@@ -50,9 +86,14 @@ class SpeexEcho:
         speaker = frame(*struct.unpack("<480h", reference))
         output = frame()
         self.lib.speex_echo_cancellation(self.state, mic, speaker, output)
+        if self.preprocessor:
+            self.lib.speex_preprocess_run(self.preprocessor, output)
         return struct.pack("<480h", *output)
 
     def close(self):
+        if self.preprocessor:
+            self.lib.speex_preprocess_state_destroy(self.preprocessor)
+            self.preprocessor = None
         if self.state:
             self.lib.speex_echo_state_destroy(self.state)
             self.state = None
