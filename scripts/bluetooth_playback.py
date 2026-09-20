@@ -73,8 +73,8 @@ def main():
 
     try:
         # Reuse the driver's bounded FIFO writes, backpressure, and disconnect handling.
-        # Keep full dynamic range. Set volume in the driver, not by clipping speech.
-        send_pcm(converted_input())
+        # Slightly attenuate both assistant speech and phone audio before Bluetooth playback.
+        send_pcm(converted_input(gain=0.75))
     except (OSError, ValueError, TimeoutError) as error:
         parser.exit(1, f"Bluetooth playback: {error}\n")
 
