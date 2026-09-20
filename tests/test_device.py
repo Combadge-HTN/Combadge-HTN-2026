@@ -19,7 +19,7 @@ def test_activation_chirp_is_the_selected_tng_clip():
 
 
 def test_haptic_uses_confirmed_pin_and_longer_wake_pulse(monkeypatch):
-    from combadge.device import BadgeHardware, WAKE_HAPTIC, _pulse
+    from combadge.device import WAKE_HAPTIC, BadgeHardware, _pulse
 
     hardware = BadgeHardware()
     outputs = []

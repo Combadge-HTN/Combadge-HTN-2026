@@ -661,7 +661,9 @@ def main(argv: list[str] | None = None) -> int:
                         if args.cue_fifo:
                             await play_fifo_cue(args.cue_fifo)
                         elif voice_options["playback_command"]:
-                            await play_local_cue(voice_options["playback_command"], activation_chirp())
+                            await play_local_cue(
+                                voice_options["playback_command"], activation_chirp()
+                            )
 
                     async def session(stop, continuity, context, cue):
                         if args.cue_fifo or voice_options["playback_command"]:
