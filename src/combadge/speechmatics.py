@@ -3,6 +3,7 @@
 import asyncio
 import io
 import json
+import logging
 import math
 import wave
 from contextlib import asynccontextmanager
@@ -11,6 +12,7 @@ from combadge.audio import RATE
 from combadge.speaker_input import SpeakerSpan
 
 URL = "wss://global.rt.speechmatics.com/v2/"
+LOG = logging.getLogger(__name__)
 
 
 def recognition_config(*, speakers=(), enrollment=False, rate=RATE):
@@ -65,7 +67,12 @@ def final_spans(message, names):
 class SpeechmaticsError(RuntimeError):
     def __init__(self, category):
         self.category = category
-        super().__init__(f"Speechmatics rejected the recognition session ({category})")
+        detail = (
+            "Speechmatics quota exceeded; check concurrent sessions and account limits"
+            if category == "quota_exceeded"
+            else f"Speechmatics rejected the recognition session ({category})"
+        )
+        super().__init__(detail)
 
 
 async def receive(websocket):
@@ -91,6 +98,7 @@ async def receive(websocket):
             "idle_timeout",
             "session_timeout",
             "unknown_error",
+            "internal_error",
         }
         kind = kind if kind in known_errors else "unknown_error"
         raise SpeechmaticsError(kind)
@@ -100,33 +108,46 @@ async def receive(websocket):
 @asynccontextmanager
 async def session(api_key, config):
     from websockets.asyncio.client import connect
+    from websockets.exceptions import ConnectionClosed
 
-    # The service documents a 5–10 second retry interval for these startup errors.
-    # Enrollment can briefly retain a slot after EndOfTranscript/socket close.
-    # Never retry after yielding: replaying a running conversation is not safe.
+    # Startup errors can arrive as JSON or as an immediate WebSocket close.
+    # Only these documented transient rejections are retried, before yielding.
+    # Never reconnect/replay an active audio session.
     for attempt in range(3):
-        websocket = await connect(
-            URL,
-            additional_headers={"Authorization": "Bearer " + api_key},
-            open_timeout=15,
-            close_timeout=1,
-            max_size=2_000_000,
-            max_queue=16,
-        )
+        websocket = None
         try:
+            websocket = await connect(
+                URL,
+                additional_headers={"Authorization": "Bearer " + api_key},
+                open_timeout=15,
+                close_timeout=1,
+                max_size=2_000_000,
+                max_queue=16,
+            )
             await websocket.send(json.dumps(config))
             async with asyncio.timeout(20):
                 while (await receive(websocket)).get("message") != "RecognitionStarted":
                     pass
         except BaseException as error:
-            await websocket.close()
-            if (
-                isinstance(error, SpeechmaticsError)
-                and error.category in {"quota_exceeded", "job_error"}
-                and attempt < 2
-            ):
-                await asyncio.sleep(5)
-                continue
+            if websocket is not None:
+                await websocket.close()
+            category = error.category if isinstance(error, SpeechmaticsError) else None
+            if isinstance(error, ConnectionClosed) and error.rcvd is not None:
+                category = {
+                    4005: "quota_exceeded",
+                    4013: "job_error",
+                    1011: "internal_error",
+                }.get(error.rcvd.code)
+            if category in {"quota_exceeded", "job_error", "internal_error"}:
+                if attempt < 2:
+                    LOG.warning(
+                        "Speechmatics startup rejected (%s); retrying in 5 seconds (%d/3).",
+                        category,
+                        attempt + 2,
+                    )
+                    await asyncio.sleep(5)
+                    continue
+                raise SpeechmaticsError(category) from None
             raise
         break
     try:
@@ -341,10 +362,28 @@ class StreamingSpeakerInput:
             group.create_task(schedule(group))
 
     async def close(self):
-        if self.connection_context is not None:
-            await self.connection_context.__aexit__(None, None, None)
-            self.connection_context = None
-        self.websocket = None
-        self.batches.clear()
-        self.words.clear()
-        self.gates.clear()
+        from websockets.exceptions import ConnectionClosed
+
+        # The upload/receive tasks must already be stopped. Finish the provider
+        # stream before closing its socket, with a bounded wait on failed sessions.
+        try:
+            if self.websocket is not None:
+                try:
+                    async with asyncio.timeout(3):
+                        await self.websocket.send(
+                            json.dumps({"message": "EndOfStream", "last_seq_no": self.sequence})
+                        )
+                        while (await receive(self.websocket)).get("message") != "EndOfTranscript":
+                            pass
+                except TimeoutError, ConnectionClosed, SpeechmaticsError, OSError:
+                    pass
+        finally:
+            try:
+                if self.connection_context is not None:
+                    await self.connection_context.__aexit__(None, None, None)
+            finally:
+                self.connection_context = None
+                self.websocket = None
+                self.batches.clear()
+                self.words.clear()
+                self.gates.clear()

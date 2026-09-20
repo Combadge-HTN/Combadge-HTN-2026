@@ -312,3 +312,157 @@ def test_long_conversation_has_fixed_latency_and_bounded_memory(provider_delay_t
             await asyncio.gather(worker, return_exceptions=True)
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("code", [4005, 4013, 1011])
+@pytest.mark.parametrize("phase", ["connect", "send", "recv"])
+def test_startup_close_frames_retry_without_replaying_audio(monkeypatch, code, phase):
+    import asyncio
+    import json
+    from types import SimpleNamespace as NS
+    from unittest.mock import AsyncMock
+
+    from websockets.exceptions import ConnectionClosedError
+    from websockets.frames import Close
+
+    from combadge.speechmatics import session
+
+    async def scenario():
+        error = ConnectionClosedError(Close(code, "private details"), None)
+        rejected = NS(send=AsyncMock(), recv=AsyncMock(), close=AsyncMock())
+        accepted = NS(
+            send=AsyncMock(),
+            recv=AsyncMock(return_value=json.dumps({"message": "RecognitionStarted"})),
+            close=AsyncMock(),
+        )
+        if phase != "connect":
+            getattr(rejected, phase).side_effect = error
+        connect = AsyncMock(side_effect=[error if phase == "connect" else rejected, accepted])
+        sleep = AsyncMock()
+        monkeypatch.setattr("websockets.asyncio.client.connect", connect)
+        monkeypatch.setattr("combadge.speechmatics.asyncio.sleep", sleep)
+        async with session("secret", recognition_config()) as ws:
+            assert ws is accepted
+        assert connect.await_count == 2
+        sleep.assert_awaited_once_with(5)
+        if phase != "connect":
+            rejected.close.assert_awaited_once()
+        accepted.close.assert_awaited_once()
+        assert all(isinstance(call.args[0], str) for call in accepted.send.await_args_list)
+
+    asyncio.run(scenario())
+
+
+def test_persistent_quota_stops_after_three_attempts_and_redacts_reason(monkeypatch, caplog):
+    import asyncio
+    from types import SimpleNamespace as NS
+    from unittest.mock import AsyncMock
+
+    from websockets.exceptions import ConnectionClosedError
+    from websockets.frames import Close
+
+    from combadge.speechmatics import SpeechmaticsError, session
+
+    async def scenario():
+        rejected = NS(
+            send=AsyncMock(side_effect=ConnectionClosedError(Close(4005, "private details"), None)),
+            close=AsyncMock(),
+        )
+        connect = AsyncMock(return_value=rejected)
+        sleep = AsyncMock()
+        monkeypatch.setattr("websockets.asyncio.client.connect", connect)
+        monkeypatch.setattr("combadge.speechmatics.asyncio.sleep", sleep)
+        with pytest.raises(SpeechmaticsError, match="concurrent sessions") as failure:
+            async with session("private-key", recognition_config()):
+                pytest.fail("A rejected session must not open")
+        assert failure.value.category == "quota_exceeded"
+        assert connect.await_count == rejected.close.await_count == 3
+        assert sleep.await_count == 2
+        assert "private" not in str(failure.value) + caplog.text
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_nonretryable_close_or_active_quota_does_not_reconnect(monkeypatch, active):
+    import asyncio
+    import json
+    from types import SimpleNamespace as NS
+    from unittest.mock import AsyncMock
+
+    from websockets.exceptions import ConnectionClosedError
+    from websockets.frames import Close
+
+    from combadge.speechmatics import session
+
+    async def scenario():
+        error = ConnectionClosedError(Close(4005 if active else 1008, "rejected"), None)
+        socket = NS(
+            send=AsyncMock(),
+            recv=AsyncMock(return_value=json.dumps({"message": "RecognitionStarted"})),
+            close=AsyncMock(),
+        )
+        if not active:
+            socket.recv.side_effect = error
+        connect = AsyncMock(return_value=socket)
+        sleep = AsyncMock()
+        monkeypatch.setattr("websockets.asyncio.client.connect", connect)
+        monkeypatch.setattr("combadge.speechmatics.asyncio.sleep", sleep)
+        with pytest.raises(ConnectionClosedError):
+            async with session("secret", recognition_config()):
+                raise error
+        assert connect.await_count == 1
+        sleep.assert_not_awaited()
+        socket.close.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("mode", ["acknowledged", "timeout", "closed", "cancelled"])
+def test_stream_shutdown_finishes_audio_and_always_releases_socket(monkeypatch, mode):
+    import asyncio
+    import json
+    from types import SimpleNamespace as NS
+    from unittest.mock import AsyncMock
+
+    from websockets.exceptions import ConnectionClosedError
+    from websockets.frames import Close
+
+    from combadge.speechmatics import StreamingSpeakerInput
+
+    async def scenario():
+        pipeline = StreamingSpeakerInput("secret", [], profiles=[])
+        events = []
+
+        async def send(message):
+            events.append(json.loads(message))
+
+        async def recv():
+            if mode == "timeout":
+                await asyncio.Event().wait()
+            if mode == "closed":
+                raise ConnectionClosedError(Close(4005, "quota_exceeded"), None)
+            if mode == "cancelled":
+                raise asyncio.CancelledError()
+            return json.dumps({"message": "EndOfTranscript"})
+
+        async def release(*args):
+            events.append("released")
+
+        pipeline.sequence = 17
+        pipeline.websocket = NS(send=send, recv=recv)
+        context = NS(__aexit__=AsyncMock(side_effect=release))
+        pipeline.connection_context = context
+        real_timeout = asyncio.timeout
+        monkeypatch.setattr("combadge.speechmatics.asyncio.timeout", lambda _: real_timeout(0.01))
+        if mode == "cancelled":
+            with pytest.raises(asyncio.CancelledError):
+                await pipeline.close()
+        else:
+            await pipeline.close()
+        assert events == [{"message": "EndOfStream", "last_seq_no": 17}, "released"]
+        assert pipeline.websocket is None and pipeline.connection_context is None
+        await pipeline.close()
+        context.__aexit__.assert_awaited_once()
+
+    asyncio.run(scenario())
