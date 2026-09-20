@@ -11,6 +11,7 @@ shop-auth.json
 __pycache__/
 *.py[cod]
 .venv/
+.majel/
 .pytest_cache/
 .ruff_cache/
 .agents/

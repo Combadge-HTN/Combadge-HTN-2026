@@ -781,8 +781,27 @@ async def connect_voice(
     loop = asyncio.get_running_loop()
     previous = signal.getsignal(signal.SIGINT)
     loop.add_signal_handler(signal.SIGINT, stop.set)
+    converter = None
+    convert_voice = (
+        settings.voice_conversion_url and not check and not console and backend != "console"
+    )
     try:
+        if convert_voice and settings.voice_conversion_autostart:
+            from combadge.voice_conversion import LocalConverter
+
+            converter = LocalConverter(
+                settings.voice_conversion_url, settings.voice_conversion_token
+            )
+            await converter.start(stop)
         while not stop.is_set():
+            session_audio = audio
+            if convert_voice:
+                from combadge.voice_conversion import ConvertedAudio
+
+                session_audio = ConvertedAudio(
+                    audio, settings.voice_conversion_url, settings.voice_conversion_token
+                )
+                print("Assistant voice: external RVC conversion enabled.", flush=True)
             async with connect(
                 LIVE_URL,
                 additional_headers={"Authorization": f"Bearer {settings.openai_api_key}"},
@@ -794,7 +813,7 @@ async def connect_voice(
             ) as websocket:
                 stats = await run_session(
                     LiveConnection(websocket),
-                    audio,
+                    session_audio,
                     settings,
                     stop,
                     check=check,
@@ -851,3 +870,5 @@ async def connect_voice(
     finally:
         loop.remove_signal_handler(signal.SIGINT)
         signal.signal(signal.SIGINT, previous)
+        if converter is not None:
+            await converter.close()

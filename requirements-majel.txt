@@ -1,0 +1,9 @@
+# Separate Python 3.12 environment. Install CPU torch/torchaudio first; see docs/MAJEL.md.
+numpy==1.26.4
+faiss-cpu==1.15.1
+praat-parselmouth==0.4.7
+transformers==4.49.0
+librosa==0.10.2.post1
+soundfile==0.14.0
+einops==0.8.2
+websockets==15.0.1

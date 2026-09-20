@@ -23,6 +23,9 @@ class Settings:
     timezone: str = "America/Toronto"
     live_model: str = "gpt-live-1"
     live_voice: str = "marin"
+    voice_conversion_url: str = ""
+    voice_conversion_token: str = field(default="", repr=False)
+    voice_conversion_autostart: bool = False
     backend_model: str = "gpt-5.6-luna"
     shopify_agent_profile_url: str = SHOPIFY_PROFILE_URL
     shopify_country: str = "CA"
@@ -50,6 +53,10 @@ def load_settings(env_file: Path = Path(".env")) -> Settings:
         timezone=value("COMBADGE_TIMEZONE") or "America/Toronto",
         live_model=value("OPENAI_LIVE_MODEL") or "gpt-live-1",
         live_voice=value("OPENAI_LIVE_VOICE") or "marin",
+        voice_conversion_url=value("COMBADGE_VOICE_CONVERSION_URL"),
+        voice_conversion_token=value("COMBADGE_VOICE_CONVERSION_TOKEN"),
+        voice_conversion_autostart=value("COMBADGE_VOICE_CONVERSION_AUTOSTART").lower()
+        in ("1", "true", "yes"),
         backend_model=value("OPENAI_BACKEND_MODEL") or "gpt-5.6-luna",
         shopify_agent_profile_url=value("SHOPIFY_AGENT_PROFILE_URL") or SHOPIFY_PROFILE_URL,
         shopify_country=value("SHOPIFY_COUNTRY") or "CA",

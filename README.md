@@ -130,6 +130,10 @@ Add `--speaker Edmon=/path/to/edmon.wav --speaker Samuel=/path/to/samuel.wav` to
 
 ### Custom speech voices
 
+For the supplied Majel Barrett RVC checkpoint, see [Majel voice setup](docs/MAJEL.md).
+That converter changes GPT-Live's output audio and can be enabled automatically
+for every audible session through `COMBADGE_VOICE_CONVERSION_URL`.
+
 `OPENAI_LIVE_VOICE` selects the voice at the start of every GPT-Live session.
 It accepts a built-in name such as `marin` or an approved OpenAI custom voice ID
 such as `voice_123abc`. The app sends custom IDs in the required object format.

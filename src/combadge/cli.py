@@ -546,6 +546,7 @@ def main(argv: list[str] | None = None) -> int:
             message = str(error) or type(error).__name__
             for secret in (
                 settings.openai_api_key,
+                settings.voice_conversion_token,
                 settings.browserbase_api_key,
                 settings.composio_api_key,
                 getattr(phone_settings, "token", ""),
