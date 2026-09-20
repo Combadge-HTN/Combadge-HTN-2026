@@ -179,6 +179,10 @@ class LocalSpeakerInput:
         self.worker, self.references = worker, references
         self.window_bytes = int(window_seconds * RATE) * 2
         self.hop_bytes = int(hop_seconds * RATE) * 2
+        self._reset_session()
+
+    def _reset_session(self):
+        """A new touch activation must start without prior audio or identity state."""
         self.pending = asyncio.Event()
         self.latest = None
         self.buffer = bytearray()
@@ -303,4 +307,7 @@ class LocalSpeakerInput:
             tasks.create_task(self._notify(connection, report, captions))
 
     async def close(self):
-        await self.worker.close()
+        try:
+            await self.worker.close()
+        finally:
+            self._reset_session()

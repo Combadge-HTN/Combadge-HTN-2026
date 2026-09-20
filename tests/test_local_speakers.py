@@ -250,3 +250,44 @@ def test_short_question_gets_final_window_and_ending_silence_does_not_discard_it
             await asyncio.gather(task, return_exceptions=True)
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("next_index,next_name", [(0, "Edmon"), (1, "Samuel")])
+def test_touch_sessions_discard_old_audio_and_publish_fresh_identity(next_index, next_name):
+    async def scenario():
+        source, worker = pipeline()
+        worker.start = AsyncMock()
+        matcher = source.matcher
+        first = type("Connection", (), {"send": AsyncMock()})()
+        task = asyncio.create_task(source.run(first, lambda _: None))
+        try:
+            source.feed(pcm(1.5))
+            await settle()
+            assert "Edmon" in first.send.call_args.args[0]["content"]
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        # A session can end with a job, PCM frame, and speaker estimate queued.
+        source.feed(pcm(0.5))
+        await source.close()
+        worker.embed.reset_mock()
+        worker.value = vector(next_index)
+        second = type("Connection", (), {"send": AsyncMock()})()
+        with patch("combadge.local_speakers.enroll", new=AsyncMock(return_value=matcher)):
+            await source.start()
+        task = asyncio.create_task(source.run(second, lambda _: None))
+        try:
+            await settle()
+            worker.embed.assert_not_awaited()
+            second.send.assert_not_awaited()
+            source.feed(pcm(1.5))
+            await settle()
+            second.send.assert_awaited_once()
+            assert next_name in second.send.call_args.args[0]["content"]
+            assert second.send.call_args.args[0]["event_id"] == "local_speaker_1"
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await source.close()
+
+    asyncio.run(scenario())
