@@ -274,7 +274,8 @@ class StreamingSpeakerInput:
                         (r for r in message["results"] if r.get("type") == "word"), spans
                     ):
                         if span.end > self.prepared:
-                            text = str(word.get("alternatives", [{}])[0].get("content", ""))
+                            alternatives = word.get("alternatives") or [{}]
+                            text = str(alternatives[0].get("content", ""))
                             self.words.append((span.start, span.end, text[:80]))
                     self.available.set()
                 if message.get("message") == "EndOfTranscript":

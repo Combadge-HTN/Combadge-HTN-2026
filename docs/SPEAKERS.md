@@ -1,6 +1,6 @@
 # Speaker identification prototype
 
-Add named speaker estimates to GPT-Live while microphone capture and spoken replies continue. Identification uses a separate `gpt-4o-transcribe-diarize` request; it is not native Live diarization. This feature is opt-in and does not grant permissions or change tool authorization.
+Add named speaker estimates to GPT-Live as conversational context. With a Speechmatics key, streaming recognition supplies attribution before the matching microphone audio reaches Live. Without that key, the older OpenAI background prototype is selected. Neither path grants permissions or changes tool authorization.
 
 ## Setup
 
@@ -33,13 +33,13 @@ combadge voice --audio-backend commands \
   --speaker Samuel=/path/to/samuel.wav
 ```
 
-Speaker analysis uses standard-library HTTPS in a background thread, matching the catalog adapter. No extra HTTP package, subprocess transport, or runtime patch is needed. The capture contract remains 24 kHz mono PCM16. Speaker behavior with the physical microphone still requires validation; installing this prototype does not install audio drivers or helpers.
+The capture contract is 24 kHz mono PCM16. Speechmatics uses the existing WebSocket transport; the older OpenAI analyzer uses standard-library HTTPS in a background thread. Installing this prototype does not install audio drivers or helpers.
 
 ## Streaming attribution before Live input
 
 With `SPEECHMATICS_API_KEY` in the selected `.env`, `--speaker` selects the streaming
 Speechmatics path. Without it, the older OpenAI background prototype below remains
-available. The streaming path is experimental and is not yet accepted for deployment.
+available. The streaming path is experimental; full acceptance is incomplete.
 
 At startup, each supplied reference is enrolled with Speechmatics. Microphone PCM
 then goes to Speechmatics first. Final word-level speaker results resolve exact
@@ -50,8 +50,9 @@ speech. Audio uses a fixed five-second staging delay. One-second attribution pac
 are prepared concurrently, with source-aligned word snippets and their scheduled
 Live input times. A Live context acknowledgment is required before releasing the
 matching PCM. If context misses its scheduled deadline, voice stops rather than
-shifting the stream or playing audio with stale labels. The legacy background labels and `identify_speaker` tool are not used in this
-mode. Pure digital silence does not generate identity updates.
+shifting the stream or playing audio with stale labels. The legacy background labels
+and `identify_speaker` tool are not used in this mode. Pure digital silence does not
+generate identity updates.
 
 There is no required warm-up utterance or six-second recording minimum. Enrollment
 runs before the microphone opens. Processing and buffering still introduce latency.
@@ -65,6 +66,31 @@ This mode sends the supplied reference clips and microphone stream to Speechmati
 and sends attributed microphone audio to OpenAI. Speaker identifiers are held in
 memory for the session. No new native QNX dependency is required; the existing
 WebSocket transport and PCM format are used.
+
+### Streaming checks
+
+The muted QNX microphone test recognized the first identity question and completed
+a two-minute conversation without buffer overflow. Recorded tests have also exercised
+enrolled speaker changes and an unenrolled synthetic voice. These do not establish
+accuracy for every voice, short interjection, overlapping speaker, or speaker echo.
+
+Replay consented test clips through both services without opening audio devices:
+
+```sh
+python scripts/check_streaming_speakers.py --env-file .env \
+  --speaker Edmon=recordings/edmon-reference.wav \
+  --speaker Samuel=recordings/samuel-reference.wav \
+  --clip Edmon=recordings/edmon-test.wav \
+  --clip Samuel=recordings/samuel-test.wav \
+  --clip unknown=recordings/unknown-test.wav
+```
+
+Test clips must be separate from enrollment and use mono PCM16 WAV at 24 kHz.
+Use `--gap 0` to exercise immediate speaker changes. This paid check uses the
+production pipeline and actual provider labels, with no scripted identities.
+It checks attribution against the clip schedule and prints replies for review.
+A successful exit verifies the label checks and clean session closure; inspect
+the replies to verify that Live actually used the appropriate speaker context.
 
 ## OpenAI background prototype: behavior and latency
 
@@ -82,7 +108,7 @@ The worker sends a plain-language match summary and the complete analyzed window
 
 Speaker observations are background context, not a request to speak. A clear match supplies the name for ordinary conversation. There is no name-answer template, required length, or prescribed confidence wording; responses follow the user's question and available context. Names the user gives or confirms remain conversational context; unknown audio alone does not contradict a self-introduction. The assistant must not announce label updates or repeat earlier answers when an update arrives. Multiple names or overlap still require uncertainty, and the estimates never authorize actions. Server acknowledgments confirm context acceptance, not that a particular reply used the label correctly.
 
-## Uncertainty and failure handling
+## OpenAI background prototype: uncertainty and failure handling
 
 - Unenrolled API speaker labels become `unknown`; labels such as A/B are not identities across windows.
 - Overlapping intervals with different labels become `ambiguous`.
@@ -94,7 +120,7 @@ Speaker observations are background context, not a request to speak. A clear mat
 
 Names are conversational hints, not authentication. Do not use this prototype to decide who may place a call, access an account, or approve a purchase.
 
-## Data and cost
+## OpenAI background prototype: data and cost
 
 Enabling this feature sends overlapping microphone windows, requested identity lookups, and every enrolled reference clip to OpenAI's transcription endpoint. Reference WAV metadata is stripped. Audio is held in bounded memory; this feature saves no recordings or transcripts. It does not send the transcription text back as trusted instructions—only validated speaker names and intervals. Provider data handling is governed by the account's API settings and policies.
 

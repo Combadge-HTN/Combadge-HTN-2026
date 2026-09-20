@@ -122,6 +122,84 @@ def test_late_provider_results_expire_to_unknown_without_previous_name():
     assert pipeline.buffer.take(RATE) is None
 
 
+@pytest.mark.parametrize("empty_alternatives", [False, True])
+def test_multiple_speakers_in_one_packet_keep_separate_context(empty_alternatives):
+    import asyncio
+    import json
+    from types import SimpleNamespace as NS
+
+    from combadge.speechmatics import StreamingSpeakerInput
+
+    async def scenario():
+        pipeline = StreamingSpeakerInput(
+            "private", [NS(name="Edmon"), NS(name="Samuel")], profiles=[]
+        )
+        events = asyncio.Queue()
+        sent = []
+        ready = asyncio.Event()
+
+        async def recv():
+            return json.dumps(await events.get())
+
+        async def send(pcm):
+            pass
+
+        async def context(message):
+            sent.append(message)
+            ready.set()
+
+        pipeline.websocket = NS(send=send, recv=recv)
+        worker = asyncio.create_task(pipeline.run(NS(send=context), lambda _: None))
+        try:
+            pcm = b"\x01\x00" * RATE
+            pipeline.feed(pcm)
+            words = []
+            for start, end, label in [(0, 0.25, "Edmon"), (0.25, 0.5, "S1"), (0.5, 1, "Samuel")]:
+                alternatives = [{"speaker": label, "content": "hello"}]
+                if empty_alternatives and label == "S1":
+                    alternatives = []
+                words.append(
+                    {
+                        "type": "word",
+                        "start_time": start,
+                        "end_time": end,
+                        "alternatives": alternatives,
+                    }
+                )
+            await events.put(
+                {"message": "AddTranscript", "metadata": {"end_time": 1}, "results": words}
+            )
+            await asyncio.wait_for(ready.wait(), 1)
+            content = sent[0]["content"]
+            payload = json.loads(content[content.index('{"block":') :])
+            assert payload["intervals"] == [
+                [0, 0.25, "Edmon"],
+                [0.25, 0.5, "unknown"],
+                [0.5, 1, "Samuel"],
+            ]
+            assert [name for name, _ in payload["spoken_words"]] == ["Edmon", "unknown", "Samuel"]
+            # Even a resolved mixed-speaker packet cannot play without its own ack.
+            for _ in range(5):
+                assert pipeline.frame(RATE * 2) == bytes(RATE * 2)
+            with pytest.raises(RuntimeError, match="missed its audio deadline"):
+                pipeline.frame(RATE * 2)
+            pipeline.observe(
+                NS(type="session.thinking.appended", client_event_id="unrelated-context")
+            )
+            assert not pipeline.batches[0]["ready"]
+            pipeline.observe(
+                NS(type="session.thinking.appended", client_event_id=sent[0]["event_id"])
+            )
+            for _ in range(5):
+                await asyncio.sleep(0)
+            assert pipeline.frame(RATE * 2) == pcm
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
 def test_transient_startup_quota_retries_but_active_session_never_replays(monkeypatch):
     import asyncio
     import json
