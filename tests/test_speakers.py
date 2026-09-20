@@ -221,7 +221,7 @@ def test_context_deduplicates_windows_and_matches_acknowledgements():
         assert "Multiple speakers or overlap: Edmon, Samuel" in messages[0]["content"]
         assert "Multiple speakers or overlap: Edmon, Samuel" in messages[1]["content"]
         assert len(labels) == 3  # Console still prints only newly observed intervals.
-        assert "not authentication or action authorization" in messages[0]["content"]
+        assert "Background speaker context (silent update)" in messages[0]["content"]
         await cancel(task)
 
     asyncio.run(scenario())
@@ -271,8 +271,8 @@ def test_configuration_opt_in():
 @pytest.mark.parametrize(
     ("names", "expected", "status"),
     [
-        (["Edmon"], "Recent speech matched the enrolled name Edmon.", "MATCH"),
-        (["Samuel"], "Recent speech matched the enrolled name Samuel.", "MATCH"),
+        (["Edmon"], "Speaker: Edmon.", "MATCH"),
+        (["Samuel"], "Speaker: Samuel.", "MATCH"),
         (["Edmon", "unknown"], "Other speech in this report was unidentified.", "MATCH"),
         (["Edmon", "Samuel"], "No single speaker identified.", "MULTIPLE"),
         (["Edmon", "ambiguous"], "No single speaker identified.", "OVERLAP"),

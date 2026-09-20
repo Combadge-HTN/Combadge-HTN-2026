@@ -122,6 +122,8 @@ async def check(settings, question, name, labels):
     answer = "".join(answers)
     named = {person for person in ("Edmon", "Samuel") if person.lower() in answer.lower()}
     expected = set() if "ambiguous" in labels else set(labels) - {"unknown"}
+    # Clear matches should inform conversation without the old defensive narration.
+    caveats = ("not sure", "might", "heard", "match", "verify", "verified", "assume")
     result = {
         "case": name,
         "scripted_labels": labels,
@@ -135,6 +137,7 @@ async def check(settings, question, name, labels):
         "names_check": bool(answer.strip())
         and (named == expected or (len(expected) > 1 and not named)),
         "question_heard": "my name" in "".join(heard).lower(),
+        "style_check": len(expected) != 1 or not any(word in answer.lower() for word in caveats),
     }
     print(json.dumps(result), flush=True)
     return result
@@ -156,6 +159,7 @@ async def main():
         0
         if all(
             r["names_check"]
+            and r["style_check"]
             and r["question_heard"]
             and r["context_acknowledged"]
             and r["finalized"]

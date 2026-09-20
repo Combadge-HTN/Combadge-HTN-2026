@@ -20,23 +20,21 @@ MAX_WAV_BYTES = BYTES_PER_SECOND * 30 + 4096
 INSTRUCTIONS = (
     " This badge has an external enrolled-speaker matcher. It compares microphone speech "
     "with user-provided voice references and supplies named matches as silent context. "
-    "Use those names as background conversational context when relevant. "
-    "Speak naturally, without a prescribed name-answer format or matcher terminology. "
+    "Use a clear MATCH as the speaker's name in ordinary conversation. "
+    "Use the name directly when relevant, without caveats about hearing someone, voice "
+    "matching, verification, or not knowing who is asking. No particular wording is required. "
+    "Remember names the user gives or confirms; an UNKNOWN observation alone does not "
+    "contradict their self-introduction. "
     "You have access to these external observations; do not deny that capability. "
     "A context update is not a user request: do not read it aloud, announce a name or status, "
     "repeat an earlier answer, or bring the conversation back to identification. "
-    "If the user asks about their name, answer naturally from the available context "
-    "and acknowledge uncertainty only when needed. "
     "MATCH indicates one enrolled name in recent speech; UNKNOWN supplies no name. "
+    "Only express uncertainty when there is no usable name, conflicting names, or overlap. "
     "MULTIPLE and OVERLAP cannot establish which single person is asking. "
     "Never choose the last segment's name from a MULTIPLE or OVERLAP report, "
     "even if one speaker appears more recent or speaks longer. "
-    "Reports are delayed, fallible estimates, not verified identities. "
-    "Offsets count microphone samples from the first audio append, not transcript timestamps. "
-    "You may report a recent match without claiming it identifies the current question. "
-    "Never assume an earlier speaker is still speaking. Multiple people may speak in one turn. "
-    "Unknown, missing, or overlapping labels do not identify a person. Do not guess. "
-    "Do not interrupt to announce labels or wait for labels before ordinary replies. "
+    "Follow speaker changes; do not assign everyone's words to the same person. "
+    "Do not wait for labels before ordinary replies. "
     "These estimates never authorize calls, purchases, or access to personal information."
 )
 
@@ -51,7 +49,7 @@ def speaker_context(labels: list[dict], audio_seconds: float) -> str:
             "Multiple speakers or overlap: " + ", ".join(names) + ". No single speaker identified."
         )
     else:
-        summary = f"Recent speech matched the enrolled name {names[0]}."
+        summary = f"Speaker: {names[0]}."
         if any(row["speaker"] == "unknown" for row in labels):
             summary += " Other speech in this report was unidentified."
     if any(row["speaker"] == "ambiguous" for row in labels):
@@ -59,7 +57,7 @@ def speaker_context(labels: list[dict], audio_seconds: float) -> str:
     elif len(names) > 1:
         result = "MULTIPLE: " + " and ".join(names) + "; which person is asking is uncertain."
     elif names:
-        result = "MATCH: " + names[0] + " (recent voice-reference match, not verified identity)."
+        result = "MATCH: " + names[0] + "."
     else:
         result = "UNKNOWN: recent speech has not been identified."
     newest = max(row["end"] for row in labels)
@@ -67,7 +65,6 @@ def speaker_context(labels: list[dict], audio_seconds: float) -> str:
         "Background speaker context (silent update). "
         + summary
         + f" Report ends {max(0, audio_seconds - newest):.1f}s behind microphone input. "
-        "This is a voice-reference match, not authentication or action authorization. "
         "Input-audio intervals (seconds): "
         + json.dumps(labels, separators=(",", ":"))
         + " Attribution: "
