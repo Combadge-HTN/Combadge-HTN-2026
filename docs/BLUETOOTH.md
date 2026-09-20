@@ -4,7 +4,7 @@ From the Pi's application checkout:
 
 ```sh
 cd ~/projects/Combadge-HTN-2026
-.venv/bin/combadge start --bluetooth --no-camera --no-shopify --no-shop-account
+.venv/bin/combadge start --no-camera --no-shopify --no-shop-account
 ```
 
 This launches the sibling `~/projects/qnx-bluetooth` driver under sudo,
@@ -14,9 +14,14 @@ restores Bluetooth hardware state. For a bounded test add `--max-seconds 20`.
 Microphone audio is sent to OpenAI; AI audio replies play through the speaker.
 Credentials stay in the application's existing `.env` file.
 
-Plain `combadge start` still uses transcript-only console output. The
-`--bluetooth` option is required for speaker playback. Camera and shopping
-can be enabled separately; they were disabled for the integration test.
+Plain `combadge start` enables Bluetooth speech, calling, camera, and shopping.
+Use `--no-bluetooth` for transcript-only console output and `--no-calls` to disable
+calling. The explicit `--bluetooth` and `--calls` options remain supported. Camera
+and shopping were disabled for the original speaker integration test.
+
+For a human call, say “Computer, call Edmon.” The assistant closes before dialing;
+your microphone and the Bluetooth speaker carry the call audio. The calling
+configuration and contacts must be present in `.env`.
 
 ## Driver compatibility and volume
 
