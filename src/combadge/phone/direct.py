@@ -47,6 +47,7 @@ class SipCall:
         self.established = False
         self.ended = False
         self.last_response = None
+        self.on_ringing = None
         self.sent_packets = 0
         self.received_packets = 0
         self.rejected_packets = 0
@@ -175,6 +176,8 @@ class SipCall:
                     self.provisional = True
                     if message.status in (180, 183):
                         self.report("\nCall: ringing\n")
+                        if message.status == 180 and self.on_ringing is not None:
+                            self.on_ringing()
                     continue
                 await self.acknowledge(message)
                 if message.status in (401, 407):
@@ -385,7 +388,9 @@ async def call_contact(settings, contact, audio, *, seconds=300, report=print, s
     failure = None
     try:
         await call.open()
-        if await call.invite():
+        from combadge.phone.ringback import invite_with_ringback
+
+        if await invite_with_ringback(call, audio, enabled=start_audio):
             # Capture must not run unread while the phone rings: QNX devices
             # can overrun and exit before the first media frame is consumed.
             if start_audio:

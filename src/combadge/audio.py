@@ -48,6 +48,8 @@ class CommandAudio:
         self.playback_command = playback_command
         self.recorder: subprocess.Popen | None = None
         self.player: subprocess.Popen | None = None
+        self.echo = None
+        self.echo_config = None
         self._logs: dict[str, str] = {}
         self._log_tasks: list[asyncio.Task] = []
 
@@ -64,18 +66,33 @@ class CommandAudio:
         while chunk := process.stderr.read(1024):
             self._logs[name] = (self._logs.get(name, "") + chunk.decode(errors="replace"))[-2048:]
 
+    async def start_playback(self) -> None:
+        """Open only the speaker, so ringback cannot overrun unread capture."""
+        if self.player is not None and self.player.poll() is None:
+            return
+        if self.playback_command is None:
+            return
+        self._logs.pop("playback", None)
+        self.player = subprocess.Popen(
+            self.playback_command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            bufsize=0,
+        )
+        self._log_tasks.append(
+            asyncio.create_task(asyncio.to_thread(self._collect_errors, "playback", self.player))
+        )
+
     async def start(self) -> None:
         self.preflight()
-        self._logs.clear()
+        self._logs.pop("capture", None)
         try:
+            from combadge.echo import configured_echo
+
             if self.playback_command is not None:
-                self.player = subprocess.Popen(
-                    self.playback_command,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                    bufsize=0,
-                )
+                self.echo = configured_echo(self.echo_config)
+            await self.start_playback()
             self.recorder = subprocess.Popen(
                 self.capture_command,
                 stdin=subprocess.DEVNULL,
@@ -83,12 +100,11 @@ class CommandAudio:
                 stderr=subprocess.PIPE,
                 bufsize=0,
             )
-            for name, process in (("capture", self.recorder), ("playback", self.player)):
-                if process is None:
-                    continue
-                self._log_tasks.append(
-                    asyncio.create_task(asyncio.to_thread(self._collect_errors, name, process))
+            self._log_tasks.append(
+                asyncio.create_task(
+                    asyncio.to_thread(self._collect_errors, "capture", self.recorder)
                 )
+            )
         except BaseException:
             await self.close()
             raise
@@ -107,7 +123,11 @@ class CommandAudio:
         return bytes(frame)
 
     async def read(self) -> bytes:
-        return await asyncio.to_thread(self._read_frame)
+        data = await asyncio.to_thread(self._read_frame)
+        if self.echo is not None:
+            processor, reference = self.echo
+            data = processor.process(data, reference.capture_reference())
+        return data
 
     def _write_all(self, data: bytes) -> None:
         assert self.player and self.player.stdin
@@ -127,6 +147,8 @@ class CommandAudio:
     async def write(self, data: bytes) -> None:
         if self.playback_command is None:
             return
+        if self.echo is not None:
+            self.echo[1].playback(data)
         await asyncio.to_thread(self._write_all, data)
 
     async def drain(self) -> None:
@@ -143,6 +165,9 @@ class CommandAudio:
             raise RuntimeError(f"Playback helper exited with status {code}")
 
     async def close(self) -> None:
+        if self.echo is not None:
+            self.echo[0].close()
+            self.echo = None
         processes = [p for p in (self.recorder, self.player) if p is not None]
         # Stop both ends before waiting, releasing blocked capture and playback threads.
         for process in processes:
