@@ -13,6 +13,12 @@ from combadge.phone.sip import Message, answer, digest, offer, read_message, rou
 from combadge.phone.srtp import Srtp, crypto, header_size
 
 
+class SipRejected(RuntimeError):
+    def __init__(self, status):
+        self.status = status
+        super().__init__(f"SIP call rejected (status {status})")
+
+
 class SipCall:
     def __init__(self, settings, number, report=print):
         self.settings = settings
@@ -204,7 +210,7 @@ class SipCall:
                 else:
                     self.ended = True
                     # Do not reflect provider headers, dialed numbers, or credentials.
-                    raise RuntimeError(f"SIP call rejected (status {message.status})")
+                    raise SipRejected(message.status)
 
     async def signaling(self):
         async def keepalive():
@@ -375,6 +381,8 @@ async def call_contact(settings, contact, audio, *, seconds=300, report=print):
     call = SipCall(settings, settings.contacts[contact], report)
     tasks = []
     confirmed = False
+    outcome = "completed"
+    failure = None
     try:
         await call.open()
         if await call.invite():
@@ -386,6 +394,19 @@ async def call_contact(settings, contact, audio, *, seconds=300, report=print):
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 task.result()
+    except SipRejected as error:
+        outcome = {480: "no-answer", 486: "busy", 600: "busy", 603: "canceled"}.get(
+            error.status, "failed"
+        )
+        failure = str(error)
+    except TimeoutError:
+        outcome = "no-answer" if call.invited and not call.established else "failed"
+        failure = "The call attempt timed out"
+    except OSError, ValueError, RuntimeError:
+        # Return only after teardown confirms the call has ended. Keep provider
+        # details and credentials out of the assistant's continuation context.
+        outcome = "failed"
+        failure = "The call failed; check the calling configuration and Twilio logs"
     finally:
         for task in tasks:
             task.cancel()
@@ -400,8 +421,9 @@ async def call_contact(settings, contact, audio, *, seconds=300, report=print):
     if not confirmed:
         raise RuntimeError("SIP hang-up unconfirmed; check Twilio console")
     return {
-        "status": "completed",
+        "status": outcome,
         "contact": contact,
+        "error": failure,
         "transport": "direct-sip",
         "sent_packets": call.sent_packets,
         "received_packets": call.received_packets,

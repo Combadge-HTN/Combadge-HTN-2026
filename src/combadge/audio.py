@@ -1,8 +1,10 @@
 """PCM audio transports for voice sessions."""
 
 import asyncio
+import queue
 import shutil
 import subprocess
+import sys
 from contextlib import suppress
 from typing import Protocol
 
@@ -195,3 +197,128 @@ class AlsaAudio(CommandAudio):
                     f"{name} is missing. Install the platform audio utilities "
                     "or configure --audio-backend commands; see docs/QNX.md."
                 )
+
+
+def audio_backend(value: str = "auto") -> str:
+    return ("mac" if sys.platform == "darwin" else "alsa") if value == "auto" else value
+
+
+class MacAudio:
+    """CoreAudio via sounddevice, with bounded callback queues and no blocking reads."""
+
+    def __init__(self, input_device: str = "default", output_device: str = "default"):
+        def device(value):
+            return None if value == "default" else int(value) if value.isdecimal() else value
+
+        self.input_device = device(input_device)
+        self.output_device = device(output_device)
+        self.recorder = self.player = None
+        self._input = queue.Queue(maxsize=100)  # At most two seconds of microphone audio.
+        self._output = queue.Queue(maxsize=5)  # At most 100 ms in the native output adapter.
+        self._remainder = b""
+        self._closed = True
+        self._failed = False
+
+    @staticmethod
+    def driver():
+        try:
+            import sounddevice
+        except (ImportError, OSError) as error:
+            raise RuntimeError(
+                "Mac audio dependency missing. Run: uv sync --extra voice --extra mac"
+            ) from error
+        return sounddevice
+
+    def preflight(self) -> None:
+        sd = self.driver()
+        try:
+            sd.check_input_settings(
+                device=self.input_device, channels=1, dtype="int16", samplerate=RATE
+            )
+            sd.check_output_settings(
+                device=self.output_device, channels=1, dtype="int16", samplerate=RATE
+            )
+        except sd.PortAudioError as error:
+            raise RuntimeError(
+                "Cannot use the selected audio devices at 24 kHz. "
+                "Run combadge voice --list-devices and select --input-device/--output-device. "
+                + str(error)
+            ) from error
+
+    def _capture(self, data, frames, timing, status) -> None:
+        if self._closed:
+            return
+        try:
+            self._input.put_nowait(bytes(data))
+        except queue.Full:
+            self._failed = True
+
+    def _play(self, data, frames, timing, status) -> None:
+        size = frames * 2  # Mono PCM16.
+        while len(self._remainder) < size:
+            try:
+                self._remainder += self._output.get_nowait()
+            except queue.Empty:
+                break
+        data[:] = self._remainder[:size].ljust(size, b"\x00")
+        self._remainder = self._remainder[size:]
+
+    async def start(self) -> None:
+        self.preflight()
+        sd = self.driver()
+        self._input = queue.Queue(maxsize=100)
+        self._output = queue.Queue(maxsize=5)
+        self._remainder = b""
+        self._failed = False
+        self._closed = False
+        options = dict(samplerate=RATE, channels=1, dtype="int16", blocksize=FRAME_BYTES // 2)
+        try:
+            self.player = sd.RawOutputStream(
+                device=self.output_device, callback=self._play, **options
+            )
+            self.recorder = sd.RawInputStream(
+                device=self.input_device, callback=self._capture, **options
+            )
+            self.player.start()
+            self.recorder.start()
+        except Exception as error:
+            await self.close()
+            raise RuntimeError(
+                "Could not start Mac audio. Allow Microphone access for your terminal in "
+                "System Settings > Privacy & Security > Microphone, then retry. " + str(error)
+            ) from error
+
+    async def read(self) -> bytes:
+        while not self._closed:
+            if self._failed:
+                raise RuntimeError("Microphone processing fell behind; restart the voice session.")
+            if not self.recorder.active:
+                raise RuntimeError("Mac microphone stopped or was disconnected.")
+            try:
+                return self._input.get_nowait()
+            except queue.Empty:
+                await asyncio.sleep(0.005)
+        raise RuntimeError("Mac audio is closed.")
+
+    async def write(self, data: bytes) -> None:
+        if len(data) % 2:
+            raise ValueError("Playback needs complete PCM16 samples.")
+        for offset in range(0, len(data), FRAME_BYTES):
+            while True:
+                if self._closed or not self.player.active:
+                    raise RuntimeError("Mac speaker stopped or was disconnected.")
+                try:
+                    self._output.put_nowait(data[offset : offset + FRAME_BYTES])
+                    break
+                except queue.Full:
+                    await asyncio.sleep(0.005)
+
+    async def close(self) -> None:
+        self._closed = True
+        for stream in (self.recorder, self.player):
+            if stream is not None:
+                try:
+                    stream.abort(ignore_errors=True)
+                finally:
+                    stream.close(ignore_errors=True)
+        self.recorder = self.player = None

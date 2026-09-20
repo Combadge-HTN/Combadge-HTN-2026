@@ -108,6 +108,32 @@ def audio_event(data):
     return event("session.output_audio.delta", delta=base64.b64encode(data).decode())
 
 
+@pytest.mark.parametrize(
+    "voice,expected",
+    [("marin", "marin"), ("cedar", "cedar"), ("voice_test_custom", {"id": "voice_test_custom"})],
+)
+def test_voice_is_selected_in_initial_session_from_environment(
+    tmp_path, monkeypatch, voice, expected
+):
+    from combadge.config import load_settings
+
+    monkeypatch.delenv("OPENAI_LIVE_VOICE", raising=False)
+    path = tmp_path / ".env"
+    path.write_text(f"OPENAI_LIVE_VOICE={voice}\n")
+
+    async def scenario():
+        stop = asyncio.Event()
+        conn = FakeConnection([audio_event(b"\x01\x00" * (FRAME_BYTES // 2))])
+        stats = await run_session(
+            conn, FakeAudio(stop), load_settings(path), stop, seconds=1, report=lambda _: None
+        )
+        assert conn.messages[0]["type"] == "session.start"
+        assert conn.messages[0]["session"]["audio"]["output"]["voice"] == expected
+        assert stats.finalized
+
+    asyncio.run(scenario())
+
+
 def test_shopping_tools_are_opt_in_and_snapshot_is_independently_optional():
     baseline = session_config(Settings())
     assert "tools" not in baseline["delegation"]["responses"]
@@ -463,10 +489,20 @@ def test_image_check_cannot_pass_on_early_speech_or_backend_text_alone(complete)
     asyncio.run(scenario())
 
 
-def test_camera_context_and_tool_describe_physical_camera():
+@pytest.mark.parametrize("integrations", [False, True])
+def test_camera_context_and_tool_describe_physical_camera(integrations):
     for shopping in (False, True):
         config = session_config(
-            Settings(), snapshots=True, capture_source="camera", shopping=shopping
+            Settings(),
+            snapshots=True,
+            capture_source="camera",
+            shopping=shopping,
+            speakers=integrations,
+            web=integrations,
+            composio=integrations,
+            sms_names=["alex"] if integrations else None,
+            call_names=["alex"] if integrations else None,
+            resume_context='{"previous_session_history":[]}' if integrations else None,
         )
         assert "badge's physical camera" in config["instructions"]
         backend = config["delegation"]["responses"]
@@ -474,3 +510,164 @@ def test_camera_context_and_tool_describe_physical_camera():
         tool = next(t for t in backend["tools"] if t["name"] == "capture_snapshot")
         assert "badge's physical camera" in tool["description"]
         assert "screen or camera" not in tool["description"]
+
+
+@pytest.mark.parametrize("snapshots,shopping,calls", [(False, False, False), (True, True, True)])
+def test_web_tools_coexist_with_other_tools(snapshots, shopping, calls):
+    config = session_config(
+        Settings(),
+        web=True,
+        snapshots=snapshots,
+        shopping=shopping,
+        call_names=["Alex"] if calls else None,
+    )
+    backend = config["delegation"]["responses"]
+    names = {tool["name"] for tool in backend["tools"]}
+    assert {"search_web", "read_web_page"} <= names
+    if snapshots:
+        assert "capture_snapshot" in names
+    if shopping:
+        assert "search_shopify" in names
+    if calls:
+        assert "call_contact" in names
+    assert "no external action tools" not in backend["instructions"]
+    assert "no other action tools" not in backend["instructions"]
+    assert "untrusted data" in backend["instructions"]
+    assert "Do not answer those questions from memory first" in config["instructions"]
+    assert "unavailable in this session" not in config["instructions"]
+
+
+def test_web_unavailable_is_explicit_without_tools():
+    config = session_config(Settings())
+    assert "Live web access is unavailable" in config["instructions"]
+    assert "tools" not in config["delegation"]["responses"]
+
+
+def test_web_only_session_keeps_audio_flowing_and_continues_with_sources():
+    import json
+
+    async def scenario():
+        stop, played = asyncio.Event(), asyncio.Event()
+
+        class Web:
+            async def search(self, query):
+                assert query == "current news"
+                await played.wait()
+                return {"status": "ok", "sources": [{"url": "https://example.com/news"}]}
+
+        class Audio(FakeAudio):
+            async def write(self, data):
+                self.output.append(data)
+                played.set()
+
+        class Connection(FakeConnection):
+            async def send(self, message):
+                await super().send(message)
+                if message["type"] == "response.create":
+                    stop.set()
+
+        script = [
+            event(
+                "response.event",
+                delegation_id="d",
+                event=event("response.created", response=NS(id="r")),
+            ),
+            event(
+                "response.event",
+                delegation_id="d",
+                event=event(
+                    "response.output_item.done",
+                    item=NS(
+                        type="function_call",
+                        call_id="c",
+                        name="search_web",
+                        arguments='{"query":"current news"}',
+                    ),
+                ),
+            ),
+            event(
+                "response.event",
+                delegation_id="d",
+                event=event("response.completed", response=NS(id="r", output=[])),
+            ),
+            audio_event(b"\x01\x00" * (FRAME_BYTES // 2)),
+        ]
+        conn, audio = Connection(script), Audio(stop)
+        stats = await run_session(
+            conn, audio, Settings(), stop, seconds=1, web=Web(), report=lambda _: None
+        )
+        assert audio.output and stats.finalized
+        backend = conn.messages[0]["session"]["delegation"]["responses"]
+        assert {"search_web", "read_web_page", "browse_web_page", "follow_web_link"} <= {
+            t["name"] for t in backend["tools"]
+        }
+        outputs = [m["item"] for m in conn.messages if m.get("item", {}).get("call_id") == "c"]
+        assert len(outputs) == 1
+        assert json.loads(outputs[0]["output"])["sources"][0]["url"] == "https://example.com/news"
+        assert any(m["type"] == "response.create" for m in conn.messages)
+
+    asyncio.run(scenario())
+
+
+def test_composio_only_session_executes_tools_without_blocking_voice_audio():
+    import json
+
+    async def scenario():
+        stop, played = asyncio.Event(), asyncio.Event()
+
+        class Apps:
+            async def execute(self, name, args, delegation_id):
+                assert name == "list_connected_app_tools"
+                assert args == {"app": "gmail"} and delegation_id == "d"
+                await played.wait()
+                return {"status": "ok", "tools": []}
+
+        class Audio(FakeAudio):
+            async def write(self, data):
+                self.output.append(data)
+                played.set()
+
+        class Connection(FakeConnection):
+            async def send(self, message):
+                await super().send(message)
+                if message["type"] == "response.create":
+                    stop.set()
+
+        script = [
+            event(
+                "response.event",
+                delegation_id="d",
+                event=event("response.created", response=NS(id="r")),
+            ),
+            event(
+                "response.event",
+                delegation_id="d",
+                event=event(
+                    "response.output_item.done",
+                    item=NS(
+                        type="function_call",
+                        call_id="c",
+                        name="list_connected_app_tools",
+                        arguments='{"app":"gmail"}',
+                    ),
+                ),
+            ),
+            event(
+                "response.event",
+                delegation_id="d",
+                event=event("response.completed", response=NS(id="r", output=[])),
+            ),
+            audio_event(b"\x01\x00" * (FRAME_BYTES // 2)),
+        ]
+        connection, audio = Connection(script), Audio(stop)
+        stats = await run_session(
+            connection, audio, Settings(), stop, seconds=1, composio=Apps(), report=lambda _: None
+        )
+        assert audio.output and stats.finalized
+        outputs = [
+            m["item"] for m in connection.messages if m.get("item", {}).get("call_id") == "c"
+        ]
+        assert len(outputs) == 1 and json.loads(outputs[0]["output"])["status"] == "ok"
+        assert any(m["type"] == "response.create" for m in connection.messages)
+
+    asyncio.run(scenario())

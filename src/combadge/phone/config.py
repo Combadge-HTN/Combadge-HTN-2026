@@ -35,13 +35,28 @@ class PhoneSettings:
     token: str = field(repr=False)
 
     @classmethod
-    def load(cls, path: Path):
+    def load(cls, path: Path, *, optional: bool = False):
         env = values(path)
         transport = env.get("CALL_TRANSPORT") or ("sip" if env.get("CALL_SIP_DOMAIN") else "relay")
         if transport == "sip":
+            if optional and not all(
+                (env.get(key) or "").strip()
+                for key in (
+                    "CALL_SIP_DOMAIN",
+                    "CALL_SIP_USERNAME",
+                    "CALL_SIP_PASSWORD",
+                    "TWILIO_FROM_NUMBER",
+                    "CALL_CONTACTS",
+                )
+            ):
+                return None
             return SipSettings.load(path)
         if transport != "relay":
             raise ValueError("CALL_TRANSPORT must be sip or relay")
+        if optional and not all(
+            (env.get(key) or "").strip() for key in ("CALL_RELAY_URL", "CALL_RELAY_TOKEN")
+        ):
+            return None
         url = secure_url(env.get("CALL_RELAY_URL", ""), "wss")
         token = env.get("CALL_RELAY_TOKEN", "")
         if len(token) < 32:

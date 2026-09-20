@@ -1,13 +1,17 @@
-"""Execute snapshot and shopping function calls without blocking the Live audio receiver."""
+"""Execute application function calls without blocking the Live audio receiver."""
 
 import asyncio
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from combadge.browserbase import WEB_TOOL_NAMES, BrowserbaseClient
 from combadge.capture import SnapshotCapture
+from combadge.composio import COMPOSIO_TOOL_NAMES, ComposioClient
 from combadge.shopify import ShoppingSession
+from combadge.sms import SMS_TOOL_NAMES, SmsClient
 from combadge.vision import ImageBudget
+from combadge.web_lookup import WebLookup
 
 SNAPSHOT_TOOL = {
     "type": "function",
@@ -35,6 +39,7 @@ class FunctionCall:
     call_id: str
     name: str
     arguments: str
+    delegation_id: str = ""
 
 
 class SnapshotDelegation:
@@ -45,14 +50,23 @@ class SnapshotDelegation:
         report: Callable[[str], None],
         *,
         shopping: ShoppingSession | None = None,
+        web: BrowserbaseClient | None = None,
+        composio: ComposioClient | None = None,
+        sms: SmsClient | None = None,
         call_handler=None,
         on_tools_submitted: Callable[[], None] | None = None,
+        on_tool_result: Callable[[str, str, dict], None] | None = None,
     ):
         self.call_handler = call_handler
         self.on_tools_submitted = on_tools_submitted
+        self.on_tool_result = on_tool_result
         self.connection = connection
         self.capture = capture
         self.shopping = shopping
+        self.web = web
+        self.composio = composio
+        self.sms = sms
+        self.web_lookup = WebLookup(web, report) if web is not None else None
         self.image_budget = ImageBudget()
         self.report = report
         self.active: dict[str, str] = {}
@@ -74,7 +88,7 @@ class SnapshotDelegation:
             if item.call_id not in self.seen:
                 self.seen.add(item.call_id)
                 self.pending[response_id].append(
-                    FunctionCall(item.call_id, item.name, item.arguments)
+                    FunctionCall(item.call_id, item.name, item.arguments, delegation)
                 )
         elif event.type == "response.completed":
             calls = self.pending.pop(event.response.id, [])
@@ -118,6 +132,12 @@ class SnapshotDelegation:
                         if self.shopping is not None:
                             self.shopping.image = image
                         result = {"status": "captured", "image_id": call.call_id}
+                    elif call.name in WEB_TOOL_NAMES and self.web_lookup is not None:
+                        result = await self.web_lookup.execute(call.name, args, call.delegation_id)
+                    elif call.name in COMPOSIO_TOOL_NAMES and self.composio is not None:
+                        result = await self.composio.execute(call.name, args, call.delegation_id)
+                    elif call.name in SMS_TOOL_NAMES and self.sms is not None:
+                        result = await self.sms.execute(call.name, args, call.delegation_id)
                     elif self.shopping is not None:
                         handlers = {
                             "search_shopify": (
@@ -155,6 +175,8 @@ class SnapshotDelegation:
                 except (OSError, RuntimeError, ValueError) as error:
                     result = {"status": "failed", "error": str(error)}
                     self.report("\nTool failed; reporting the error to the assistant.\n")
+                if self.on_tool_result is not None:
+                    self.on_tool_result(call.name, call.arguments, result)
                 await self.connection.send(
                     {
                         "type": "response.item.create",
