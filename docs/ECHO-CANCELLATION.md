@@ -51,8 +51,13 @@ independent near-end signal. Before deployment, validate on the Pi with:
 - Both people speaking together, checking that badge speech is preserved.
 - Bluetooth reconnects and changing delays, checking recovery.
 
-The current Bluetooth calibration is complete, but real-time acoustic cancellation
-and QNX library loading have not yet been validated. Calibration recordings stay
+Native QNX library loading and synthetic cancellation have been verified. However,
+two acoustic tests with the USB microphone and Bluetooth speaker showed almost
+no reduction of the known speaker signal (approximately 0–0.14 dB), even after
+separating that signal from room noise. This prototype is not an effective echo
+solution for the tested setup yet. Capture frames arrive in bursts, so aligning
+the reference to each read's wall-clock timestamp remains a suspected timing
+problem in addition to independent device clocks. Calibration recordings stay
 on the Pi outside the Git checkout.
 
 If independent clocks defeat this prototype, use a shared-clock USB audio device
