@@ -157,8 +157,8 @@ def test_direct_call_auth_audio_and_hangup(monkeypatch, ending):
                     with pytest.raises(asyncio.CancelledError):
                         await task
                 elif ending in ("busy", "auth-denied"):
-                    with pytest.raises(RuntimeError, match="rejected"):
-                        await task
+                    result = await task
+                    assert result["status"] == ("busy" if ending == "busy" else "failed")
                 else:
                     result = await task
                     assert result["transport"] == "direct-sip"

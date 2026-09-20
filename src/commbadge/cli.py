@@ -14,9 +14,11 @@ from pathlib import Path
 from commbadge.audio import MacAudio, audio_backend
 from commbadge.browserbase import BrowserbaseClient
 from commbadge.capture import COSMIC_SCREENSHOT, SnapshotCapture
+from commbadge.composio import ComposioClient
 from commbadge.config import load_settings
 from commbadge.shop_account import DEFAULT_AUTH_FILE, ShopAccount, TokenStore
 from commbadge.shopify import CatalogClient, ShoppingSession
+from commbadge.sms import SmsClient, SmsSettings
 from commbadge.vision import DEFAULT_QUESTION, ImageInput
 
 
@@ -58,10 +60,16 @@ def main(argv: list[str] | None = None) -> int:
         "--max-seconds",
         type=positive_seconds,
         default=None,
-        help="session limit after startup (default: 300; check: 15; image check: 45)",
+        help="limit per assistant session, including after calls (default: 300; check: 15/45)",
     )
     voice.add_argument(
         "--no-web", action="store_true", help="disable automatic Browserbase online lookups"
+    )
+    voice.add_argument(
+        "--composio",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Gmail and Google Calendar tools (automatic when key and User ID are configured)",
     )
     voice.add_argument("--no-captions", action="store_true", help="hide transcript output")
     voice.add_argument("--image", type=Path, help="send a JPEG, PNG, or WebP to the vision backend")
@@ -73,7 +81,18 @@ def main(argv: list[str] | None = None) -> int:
     snapshots.add_argument(
         "--snapshot-command", help="image capture helper with {directory} placeholder (no shell)"
     )
-    voice.add_argument("--calls", action="store_true", help="enable human phone calls via a relay")
+    voice.add_argument(
+        "--calls",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="human phone calls (automatic when SIP or relay settings are configured)",
+    )
+    voice.add_argument(
+        "--sms",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Twilio texting (automatic when account credentials and SMS number are configured)",
+    )
     from commbadge.phone.cli import register
     from commbadge.phone.cli import run as run_phone
 
@@ -121,17 +140,71 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="also fetch the first result to verify page access",
     )
+    apps = commands.add_parser("composio", help="inspect connected app setup without audio")
+    apps.add_argument("action", choices=("accounts", "status", "tools"))
+    apps.add_argument("--app", choices=("gmail", "googlecalendar"))
+    apps.add_argument("--env-file", type=Path, default=Path(".env"))
+    texts = commands.add_parser("sms", help="send or read texts using the dedicated SMS number")
+    texts.add_argument("--env-file", type=Path, default=Path(".env"))
+    sms_commands = texts.add_subparsers(dest="sms_action", required=True)
+    sms_commands.add_parser("check", help="verify credentials and sender capability; sends no text")
+    sms_commands.add_parser("contacts", help="list configured SMS contact names offline")
+    send = sms_commands.add_parser("send", help="send an SMS (uses Twilio credits)")
+    send.add_argument("recipient", help="configured contact name or E.164 number")
+    send.add_argument("body", help="text to send, in quotes")
+    read = sms_commands.add_parser("read", help="read recent incoming texts")
+    read.add_argument("--contact", help="filter by contact name or E.164 sender")
+    read.add_argument("--limit", type=int, choices=range(1, 11), default=5, metavar="1..10")
     args = parser.parse_args(argv)
+    sms = None
+    if args.command == "voice" and args.sms and (args.check or args.list_devices):
+        parser.error("--sms requires a voice session; use sms check to verify SMS setup")
+    if args.command == "sms" or (
+        args.command == "voice"
+        and args.sms is not False
+        and not args.check
+        and not args.list_devices
+    ):
+        try:
+            sms_settings = SmsSettings.load(
+                args.env_file, optional=args.command == "voice" and args.sms is None
+            )
+            sms = SmsClient(sms_settings) if sms_settings is not None else None
+            if args.command == "sms":
+                if args.sms_action == "contacts":
+                    print("\n".join(sorted(sms.settings.contacts)))
+                    return 0
+                if args.sms_action == "check":
+                    result = asyncio.run(sms.check())
+                elif args.sms_action == "send":
+                    result = asyncio.run(sms.send(args.recipient, args.body))
+                else:
+                    result = asyncio.run(sms.read(args.contact, args.limit))
+                print(json.dumps(result, indent=2, ensure_ascii=False))
+                return 1 if result["status"] in ("failed", "undelivered", "unknown") else 0
+        except (OSError, ValueError, RuntimeError) as error:
+            parser.exit(1, f"SMS: {error}\n")
+        except KeyboardInterrupt:
+            parser.exit(130, "SMS interrupted; check Twilio message logs before retrying a send.\n")
+    if args.command == "voice" and args.composio and (args.check or args.list_devices):
+        parser.error(
+            "--composio requires a voice session; use composio status to check connections"
+        )
     if args.command in ("call", "phone-relay"):
         return run_phone(args, parser)
-    phone_settings = None
-    if args.command == "voice" and args.calls:
-        if args.check or args.list_devices:
-            parser.error("--calls requires a voice session")
-        from commbadge.phone.config import PhoneSettings
+    from commbadge.phone.config import PhoneSettings, SipSettings
 
+    phone_settings = None
+    if args.command == "voice" and args.calls and (args.check or args.list_devices):
+        parser.error("--calls requires a voice session")
+    if (
+        args.command == "voice"
+        and args.calls is not False
+        and not args.check
+        and not args.list_devices
+    ):
         try:
-            phone_settings = PhoneSettings.load(args.env_file)
+            phone_settings = PhoneSettings.load(args.env_file, optional=args.calls is None)
         except (OSError, ValueError) as error:
             parser.error(str(error))
 
@@ -227,6 +300,23 @@ def main(argv: list[str] | None = None) -> int:
     except OSError:
         parser.exit(1, "Could not read the selected environment file. Check its permissions.\n")
 
+    if args.command == "composio":
+        if args.action == "tools" and not args.app:
+            parser.error("composio tools requires --app")
+        try:
+            apps_client = ComposioClient.from_settings(settings)
+            if args.action == "accounts":
+                # Setup diagnostics must reveal owners even when the configured ID is wrong.
+                result = asyncio.run(ComposioClient(settings.composio_api_key).connected_accounts())
+            elif args.action == "status":
+                result = asyncio.run(apps_client.connection_status())
+            else:
+                result = asyncio.run(apps_client.list_tools(args.app))
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0
+        except (OSError, ValueError, RuntimeError) as error:
+            parser.exit(1, f"Composio: {error}\n")
+
     if args.command == "web-search":
         try:
             web = BrowserbaseClient(settings.browserbase_api_key, settings.browserbase_project_id)
@@ -279,6 +369,46 @@ def main(argv: list[str] | None = None) -> int:
         try:
             from commbadge.live import connect_voice
 
+            enable_composio = args.composio
+            if enable_composio is None:
+                enable_composio = bool(
+                    settings.composio_api_key and settings.composio_user_id and not args.check
+                )
+            composio = ComposioClient.from_settings(settings) if enable_composio else None
+            if composio is not None:
+                composio.require_user()
+                print("Connected apps: Composio enabled (Gmail, Google Calendar).")
+            elif not args.check:
+                print(
+                    "Connected apps: disabled (--no-composio)."
+                    if args.composio is False
+                    else "Connected apps: unavailable (set COMPOSIO_API_KEY and COMPOSIO_USER_ID)."
+                )
+            if sms is not None:
+                print("Text messaging: Twilio enabled (separate SMS sender).")
+                print(
+                    "SMS contacts: "
+                    + (", ".join(sorted(sms.settings.contacts)) or "none configured")
+                )
+            elif not args.check:
+                print(
+                    "Text messaging: disabled (--no-sms)."
+                    if args.sms is False
+                    else "Text messaging: unavailable (set TWILIO_ACCOUNT_SID, "
+                    "TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER_TXT)."
+                )
+            if phone_settings is not None:
+                if isinstance(phone_settings, SipSettings):
+                    print("Calling: Twilio SIP enabled.")
+                    print("Call contacts: " + ", ".join(sorted(phone_settings.contacts)))
+                else:
+                    print("Calling: relay enabled; contacts will be loaded from the relay.")
+            elif not args.check:
+                print(
+                    "Calling: disabled (--no-calls)."
+                    if args.calls is False
+                    else "Calling: unavailable (configure SIP or relay; see docs/CALLING.md)."
+                )
             web = (
                 BrowserbaseClient(settings.browserbase_api_key, settings.browserbase_project_id)
                 if settings.browserbase_api_key and not args.no_web and not args.check
@@ -307,6 +437,8 @@ def main(argv: list[str] | None = None) -> int:
                     phone_settings=phone_settings,
                     shopping=shopping,
                     web=web,
+                    composio=composio,
+                    sms=sms,
                     playback_command=shlex.split(args.playback_command)
                     if args.playback_command
                     else None,
@@ -322,7 +454,10 @@ def main(argv: list[str] | None = None) -> int:
             for secret in (
                 settings.openai_api_key,
                 settings.browserbase_api_key,
-                phone_settings.token if phone_settings else "",
+                settings.composio_api_key,
+                getattr(phone_settings, "token", ""),
+                getattr(phone_settings, "password", ""),
+                sms.settings.auth_token if sms else "",
             ):
                 if secret:
                     message = message.replace(secret, "[REDACTED]")
@@ -333,6 +468,8 @@ def main(argv: list[str] | None = None) -> int:
         ("OPENAI_API_KEY", bool(settings.openai_api_key)),
         ("BROWSERBASE_API_KEY", bool(settings.browserbase_api_key)),
         ("BROWSERBASE_PROJECT_ID", bool(settings.browserbase_project_id)),
+        ("COMPOSIO_API_KEY", bool(settings.composio_api_key)),
+        ("COMPOSIO_USER_ID", bool(settings.composio_user_id)),
     ):
         print(f"  {name}: {'set' if present else 'not set'}")
     host = platform.system()
@@ -356,6 +493,7 @@ def main(argv: list[str] | None = None) -> int:
         else "Web access: unavailable; set BROWSERBASE_API_KEY"
     )
     print("Web check: commbadge web-search 'Browserbase documentation' --read-first")
+    print("Connected app check: commbadge composio status")
     print("API check: commbadge voice --check")
     print("Voice options: commbadge voice --help")
     return 0

@@ -17,6 +17,7 @@ mac = ["sounddevice>=0.5,<0.6"]
 images = ["Pillow>=12.3,<13"]
 
 [project.scripts]
+combadge = "commbadge.cli:main"
 commbadge = "commbadge.cli:main"
 
 [tool.setuptools.packages.find]

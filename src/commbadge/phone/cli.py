@@ -83,6 +83,7 @@ def run(args, parser: argparse.ArgumentParser):
             print("Starting a human phone call. You speak directly; Ctrl+C hangs up.")
             result = asyncio.run(connect())
             print(f"Call ended: {result['status']}")
+            return 0 if result["status"] in ("completed", "ended") else 1
         return 0
     except KeyboardInterrupt:
         return 130

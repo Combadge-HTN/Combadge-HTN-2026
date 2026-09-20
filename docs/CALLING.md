@@ -6,7 +6,8 @@ Combadge places outbound calls directly through Twilio Elastic SIP Trunking:
 
 No relay server, tunnel, public webhook, browser, or companion phone is required.
 The user speaks directly to the other person. GPT-Live closes its session and
-connection before dialing and stays disconnected after hang-up.
+connection before dialing, then opens a new assistant session after confirmed
+hang-up or an unanswered/busy call. Phone-call audio is never sent to GPT-Live.
 
 ## Twilio configuration
 
@@ -75,8 +76,13 @@ commbadge call edmon --audio-backend commands \
 ```
 
 These helper paths are placeholders. See the [QNX audio contract](QNX.md).
-For voice-initiated calls, add `--calls` to the existing working `commbadge voice`
-command and say **“Computer, call Edmon.”**
+For voice-initiated calls, run your existing `commbadge voice` command and say
+**“Computer, call Edmon.”** Calling loads automatically when the selected SIP or
+relay transport is configured. Startup reports the enabled transport and, for
+SIP, the loaded contact names. Use `--no-calls` to disable calling for a session,
+or `--calls` to require valid calling configuration. Audio checks and device
+listing never enable calls. Texting and calling can both be enabled; “call him”
+after texting a named contact uses that contact when the reference is clear.
 
 ## Shutdown and failure behavior
 
@@ -87,8 +93,20 @@ result and continues the backend response. Dialing requires OpenAI's final
 The other person can hang up; Ctrl+C or the configured duration limit also ends
 the call. A pending call sends SIP CANCEL, an answered call sends BYE, and an
 answer racing cancellation is acknowledged and then ended. Calls are never
-redialed automatically. The command exits after hang-up; it does not restart the
-assistant. Spoken “hang up” and a physical hang-up button are not implemented.
+redialed automatically. Voice-initiated calls return to GPT-Live after confirmed
+termination, including busy, unanswered and failed attempts with confirmed cleanup.
+The assistant says “Computer is back. How can I help?” and listens again. Ctrl+C
+ends the whole command and does not reconnect. Standalone `commbadge call` still
+exits after the call. Spoken “hang up” and a physical hang-up button are not implemented.
+
+The new assistant session receives a bounded, in-memory history of recent
+conversation transcripts, tool results, and the call outcome. It receives no
+phone-call audio or transcript. Old actions are not replayed; the assistant waits
+for a new request. Older context may be omitted, and the initial image request is
+not rerun. SMS, calling, connected apps, and the other configured tools remain
+available. Each resumed assistant session gets the same `--max-seconds` limit.
+Reconnecting uses normal voice API credits. If reconnecting fails, the command
+reports the error and stops; it does not retry the phone call.
 
 TLS certificates are verified and unencrypted media is rejected. The supported
 media profile is PCMU with `AES_CM_128_HMAC_SHA1_80`, no MKI or key rotation.
@@ -98,7 +116,8 @@ Twenty seconds without authenticated incoming audio ends the local call.
 The duration limit is enforced by this client. Unlike the previous relay's REST
 call setup, it is not a provider-enforced per-call time limit. If network failure
 prevents confirmed hang-up, the client reports it; check the Twilio Console and
-end the call there. No call audio is recorded by this code or the configured trunk.
+end the call there. GPT-Live does not reconnect in that uncertain state. No call
+audio is recorded by this code or the configured trunk.
 
 ## Verification
 

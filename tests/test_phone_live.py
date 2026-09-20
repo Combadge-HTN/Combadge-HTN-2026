@@ -1,6 +1,7 @@
 import asyncio
 import json
 from types import SimpleNamespace as NS
+from unittest.mock import AsyncMock
 
 import pytest
 from test_live import FakeAudio, FakeConnection, event
@@ -8,6 +9,7 @@ from test_live import FakeAudio, FakeConnection, event
 from commbadge.config import Settings
 from commbadge.live import connect_voice, run_session
 from commbadge.phone.config import PhoneSettings, SipSettings
+from commbadge.sms import SmsClient, SmsSettings
 
 
 def call_events():
@@ -27,6 +29,42 @@ def call_events():
         ),
         nested("response.completed", response=NS(id="r1")),
     ]
+
+
+def test_text_then_call_shares_session_and_closes_for_phone_handoff():
+    async def scenario():
+        texts = call_events()
+        for envelope in texts:
+            envelope.delegation_id = "sms-request"
+            if hasattr(envelope.event, "response"):
+                envelope.event.response.id = "sms-response"
+        texts[1].event.item.call_id = "sms-call"
+        texts[1].event.item.name = "send_text"
+        texts[1].event.item.arguments = '{"recipient":"alex","body":"I am running late"}'
+        connection = FakeConnection([*texts, *call_events()])
+        stop = asyncio.Event()
+        sms = SmsClient(SmsSettings("AC" + "a" * 32, "test-token", "+15485550100"))
+        sms.execute = AsyncMock(return_value={"status": "queued", "delivered": False})
+        phone = SipSettings(
+            "test.pstn.twilio.com", "badge", "private-password",
+            "+14165550100", {"alex": "+14165550101"},
+        )
+        stats = await run_session(
+            connection, FakeAudio(stop), Settings(), stop,
+            phone_settings=phone, sms=sms, seconds=1, report=lambda _: None,
+        )
+        assert stats.finalized and stats.phone_contact == "alex"
+        sms.execute.assert_awaited_once_with(
+            "send_text", {"recipient": "alex", "body": "I am running late"}, "sms-request"
+        )
+        outputs = [
+            json.loads(m["item"]["output"]) for m in connection.messages
+            if m["type"] == "response.item.create"
+        ]
+        assert outputs[0]["status"] == "queued"
+        assert outputs[1] == {"status": "handoff_requested", "contact": "alex", "dialed": False}
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("acknowledge_close", [True, False])
@@ -82,8 +120,9 @@ def test_call_request_completes_tool_exchange_before_finalizing_live(
 
 @pytest.mark.parametrize("acknowledge_close", [True, False])
 @pytest.mark.parametrize("transport", ["relay", "sip"])
-def test_voice_disconnects_before_dialing_and_never_reconnects(
-    monkeypatch, acknowledge_close, transport
+@pytest.mark.parametrize("outcome", ["completed", "no-answer", "busy"])
+def test_voice_disconnects_before_dialing_and_reconnects_only_after_call_ends(
+    monkeypatch, acknowledge_close, transport, outcome
 ):
     async def scenario():
         import websockets.asyncio.client
@@ -93,6 +132,8 @@ def test_voice_disconnects_before_dialing_and_never_reconnects(
 
         sequence = []
         connection = FakeConnection(call_events(), acknowledge_close=acknowledge_close)
+        resumed = FakeConnection()
+        opened = []
 
         async def fast_session(*args, **kwargs):
             return await run_session(*args, **kwargs, close_timeout=0.01)
@@ -114,19 +155,26 @@ def test_voice_disconnects_before_dialing_and_never_reconnects(
                 await super().close()
 
         class WebSocket:
+            def __init__(self, connection):
+                self.connection = connection
+
             async def send(self, data):
-                await connection.send(json.loads(data))
+                await self.connection.send(json.loads(data))
 
             async def recv(self):
-                return json.dumps(await connection.recv(), default=vars)
+                return json.dumps(await self.connection.recv(), default=vars)
 
         class Context:
+            def __init__(self, *args, **kwargs):
+                self.connection = (connection, resumed)[len(opened)]
+                opened.append(self.connection)
+
             async def __aenter__(self):
                 sequence.append("openai-open")
-                return WebSocket()
+                return WebSocket(self.connection)
 
             async def __aexit__(self, *_):
-                assert connection.closed
+                assert self.connection.closed
                 sequence.append("openai-closed")
 
         async def names(_):
@@ -137,12 +185,12 @@ def test_voice_disconnects_before_dialing_and_never_reconnects(
             assert connection.closed and not audio.closed
             assert contact == "alex"
             sequence.append("phone-call")
-            return {"status": "completed", "contact": contact}
+            return {"status": outcome, "contact": contact}
 
         monkeypatch.setattr(live, "AlsaAudio", Audio)
         monkeypatch.setattr(live, "MacAudio", Audio)
         monkeypatch.setattr(live, "run_session", fast_session)
-        monkeypatch.setattr(websockets.asyncio.client, "connect", lambda *a, **kw: Context())
+        monkeypatch.setattr(websockets.asyncio.client, "connect", Context)
         if transport == "relay":
             monkeypatch.setattr(client, "contacts", names)
             monkeypatch.setattr(client, "call_contact", phone)
@@ -163,7 +211,7 @@ def test_voice_disconnects_before_dialing_and_never_reconnects(
             check=False,
             input_device="default",
             output_device="default",
-            seconds=1,
+            seconds=0.02,
             captions=False,
             phone_settings=config,
         )
@@ -174,6 +222,16 @@ def test_voice_disconnects_before_dialing_and_never_reconnects(
             return
         stats = await session
         assert stats.finalized
+        assert stats.phone_contact is None  # Previous call cannot trigger a second dial.
+        resume_config = resumed.messages[0]["session"]
+        context = resume_config["input"][0]["content"][0]["text"]
+        assert outcome in context and "alex" in context
+        assert "Do not repeat" in resume_config["instructions"]
+        assert any(
+            message["type"] == "session.instructions.append"
+            and "Computer is back" in message["content"]
+            for message in resumed.messages
+        )
         assert sequence == [
             "openai-open",
             "audio-start",
@@ -182,6 +240,10 @@ def test_voice_disconnects_before_dialing_and_never_reconnects(
             "audio-start",
             "phone-call",
             "audio-close",
+            "openai-open",
+            "audio-start",
+            "audio-close",
+            "openai-closed",
         ]
 
     asyncio.run(scenario())

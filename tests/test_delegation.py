@@ -1,6 +1,7 @@
 import asyncio
 import json
 from types import SimpleNamespace as NS
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -136,6 +137,30 @@ def test_returns_all_function_results_before_continuation():
     ]
     assert outputs == ["c1", "c2"]
     assert connection.messages[-1] == {"type": "response.create"}
+
+
+def test_connected_app_result_returns_to_live_backend_and_continues():
+    async def scenario():
+        connection = Connection()
+        composio = NS(execute=AsyncMock(return_value={"status": "ok", "data": {"items": []}}))
+        delegation = SnapshotDelegation(connection, None, lambda _: None, composio=composio)
+        args = {"tool_slug": "GOOGLECALENDAR_EVENTS_LIST", "arguments_json": "{}"}
+        delegation.observe(event("response.created", response=NS(id="r1")))
+        delegation.observe(call("c1", "run_connected_app_tool", json.dumps(args)))
+        delegation.observe(event("response.completed", response=NS(id="r1")))
+        worker = asyncio.create_task(delegation.run())
+        try:
+            await asyncio.wait_for(connection.continued.wait(), 1)
+            composio.execute.assert_awaited_once_with("run_connected_app_tool", args, "d1")
+            result = connection.messages[0]["item"]
+            assert result["call_id"] == "c1"
+            assert json.loads(result["output"]) == {"status": "ok", "data": {"items": []}}
+            assert connection.messages[-1] == {"type": "response.create"}
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+
+    asyncio.run(scenario())
 
 
 def test_full_image_budget_reports_error_and_continues_without_sending_image():

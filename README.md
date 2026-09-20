@@ -71,6 +71,21 @@ Press **Ctrl+C** to end the session. Sessions default to five minutes; use `--ma
 
 `commbadge doctor` reports configuration and audio utility availability. `commbadge voice --check` verifies API access and generated audio without opening audio devices; it consumes API credits.
 
+### Custom speech voices
+
+`OPENAI_LIVE_VOICE` selects the voice at the start of every GPT-Live session.
+It accepts a built-in name such as `marin` or an approved OpenAI custom voice ID
+such as `voice_123abc`. The app sends custom IDs in the required object format.
+Set the value in `.env` and start a new `commbadge voice` session to use it.
+An unavailable custom voice produces an API error; there is no silent fallback.
+
+This does not include the original Star Trek computer voice. A startup prompt
+cannot install a voice from an audio clip, and a recording URL is not a voice ID.
+OpenAI's [custom voice setup](https://developers.openai.com/api/docs/guides/custom-voices#use-a-custom-voice-with-gpt-live)
+requires project access, a speaker-consent recording and a matching reference
+sample. A voice model hosted by another provider would need a separate audio
+conversion or speech-generation integration; its ID cannot be used here.
+
 ## Live web research with Browserbase
 
 Set `BROWSERBASE_API_KEY` in `.env` or the environment. Normal `commbadge voice`
@@ -144,6 +159,71 @@ References: [Browserbase Search](https://docs.browserbase.com/reference/api/web-
 [cloud sessions](https://docs.browserbase.com/reference/api/create-a-session), and
 [GPT-Live delegation](https://developers.openai.com/api/docs/guides/live-delegation).
 
+## Gmail and Google Calendar with Composio
+
+Connect Gmail and Google Calendar in the same Composio Platform project, using
+Composio-managed OAuth2 and completing Google's sign-in and consent flow for each.
+An auth configuration alone is not a connected account. The project API key needs
+**Tools: Read only**, **Connected accounts: Read only**, and
+**Tool execution (Legacy): Write only**. Google permissions must also cover the
+actions you want (reading email, sending/drafting, reading/editing events).
+
+Set `COMPOSIO_API_KEY` in `.env`, then inspect the connected account owners:
+
+```sh
+.venv/bin/commbadge composio accounts
+```
+
+Set `COMPOSIO_USER_ID` to the exact `user_id` returned for your accounts, which
+must share one owner. This is the connected-account owner, not the Composio project
+ID. The `accounts` command lists supported connections across the project for
+setup; runtime execution is restricted to `COMPOSIO_USER_ID`. If that user has
+multiple Gmail or Calendar accounts, select one with `COMPOSIO_GMAIL_ACCOUNT_ID`
+or `COMPOSIO_GOOGLECALENDAR_ACCOUNT_ID`. Set `COMBADGE_TIMEZONE` for relative dates
+and event times (default `America/Toronto`).
+
+```sh
+.venv/bin/commbadge composio status
+.venv/bin/commbadge composio tools --app gmail
+.venv/bin/commbadge composio tools --app googlecalendar
+.venv/bin/commbadge voice
+```
+
+Normal voice sessions automatically enable Gmail and Calendar when both
+`COMPOSIO_API_KEY` and `COMPOSIO_USER_ID` are configured. The startup banner reads
+`Connected apps: Composio enabled (Gmail, Google Calendar).` Use `--no-composio`
+to disable them for a session, or `--composio` to require valid configuration.
+Audio check and device-listing modes do not automatically enable connected apps.
+Keep your usual camera, shopping, call, and audio options. GPT-Live delegates inbox
+and schedule questions to its backend,
+which discovers supported actions, inspects their input schemas, and executes them
+through Composio. Browserbase can supply public research in the same request;
+private email and calendar data use the connected Google APIs. Results used to
+answer your question are passed to the model. No Composio SDK is required.
+
+Try: "Summarize my five most recent unread emails", "Find the email with my hotel
+booking", "Draft a reply to that email saying I'll arrive at 3 PM", "What is on my
+calendar tomorrow?", or "Find a free 30-minute slot tomorrow afternoon". You can
+also request a specific email send/reply/forward, or create, move, and delete calendar
+events. Resolve unclear recipients, event times, and attendees before making changes.
+A request to draft does not authorize sending. An email's contents cannot authorize
+actions. Unknown write outcomes are not retried automatically.
+
+Email summaries use `search_gmail_messages` with an explicit read/unread/all filter.
+The app searches message IDs, opens each result with Gmail's full-message API,
+checks its current `UNREAD` label, and decodes the actual body (nested MIME,
+plain text, or HTML). Subjects and inbox previews are not used as body substitutes.
+Up to five messages are opened per search page; longer bodies have continuation
+offsets for `read_gmail_message`. The assistant can open an individual message for
+follow-up questions and must report unavailable or incomplete content. These API
+reads do **not** mark emails read in Gmail; they leave mailbox labels unchanged.
+
+This add-on supports Gmail and Google Calendar only. It has no SMS tools, background
+inbox monitoring, arbitrary Google app access, or email attachment-download tool.
+`status` checks connection metadata and `tools` checks discovery; neither proves
+all Google scopes work. Start with a read request in voice, then try a draft or
+calendar change you actually want. Reconnect in Composio if access expires.
+
 ## Image questions
 
 Add a still image and question to the voice command:
@@ -200,13 +280,51 @@ This uses `cosmic-screenshot` through the desktop screenshot portal. Allow its s
 ## Human phone calls
 
 Configure a Twilio SIP trunk to speak directly to another person through the badge.
-Use `commbadge call alex` for a standalone call, or add `--calls` to a voice session
-and say “Call Alex.” Contact names and numbers are configured on the badge.
+Use `commbadge call alex` for a standalone call, or run `commbadge voice` and say
+“Call Alex.” Voice sessions enable calling automatically when SIP or relay settings
+are configured. Startup reports the calling transport and, for SIP, contact names.
+Use `--no-calls` to disable it or `--calls` to require valid calling configuration.
+Contact names and numbers are configured on the badge.
+
+The assistant disconnects during the human call and reconnects after confirmed
+hang-up or an unanswered/busy call. Recent conversation and tool results carry
+forward; phone-call audio stays outside the assistant. Ctrl+C ends the whole
+command. Standalone `commbadge call` exits after the call.
 
 The badge connects directly to Twilio using TLS and encrypted SRTP audio; no relay
 server or tunnel is required. It keeps its 24 kHz PCM helpers and handles telephone
 audio conversion itself. See [calling setup](docs/CALLING.md) for credentials,
 QNX requirements, hang-up behavior, and validation limits. Calls use Twilio credits.
+
+## Text messaging
+
+Set `TWILIO_FROM_NUMBER_TXT` to your dedicated SMS-capable number and provide
+`TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` for the account that owns it.
+`TWILIO_FROM_NUMBER` continues to be used for calls. SMS reuses `CALL_CONTACTS`
+unless you provide a separate `SMS_CONTACTS` JSON map.
+
+```sh
+commbadge sms check
+commbadge sms contacts
+commbadge voice
+```
+
+Say **“Computer, text Alex that I'm running five minutes late”** or
+**“Computer, read my recent texts from Alex.”** SMS is enabled automatically when
+the three Twilio settings are present. Startup prints `Text messaging: Twilio enabled`
+and the configured contact names. Use `--no-sms` to disable texting for a session,
+or `--sms` to require SMS configuration. It works alongside `--calls` and your
+existing app/audio/camera options. For standalone use:
+
+```sh
+commbadge sms send alex "I'm running five minutes late."
+commbadge sms read --contact alex --limit 5
+```
+
+`sms check` verifies account access, number ownership and SMS capability without
+sending a message. Sending uses Twilio credits; queued/sent does not prove delivery.
+Recent incoming texts are fetched on request, with no webhook or background polling.
+See [SMS setup](docs/SMS.md) for account requirements and failure handling.
 
 ## Shopping with Shopify
 
@@ -276,12 +394,16 @@ API references: [Shopify Global Catalog](https://shopify.dev/docs/agents/catalog
 | --- | --- | --- |
 | `OPENAI_API_KEY` | Required | OpenAI authentication |
 | `OPENAI_LIVE_MODEL` | `gpt-live-1` | Voice model |
-| `OPENAI_LIVE_VOICE` | `marin` | Response voice |
+| `OPENAI_LIVE_VOICE` | `marin` | Built-in response voice name or approved OpenAI custom voice ID (`voice_...`) |
 | `OPENAI_BACKEND_MODEL` | `gpt-5.6-luna` | Delegated reasoning model |
 | `BROWSERBASE_API_KEY` | Unset | Enables automatic Search/Fetch tools in voice sessions |
 | `BROWSERBASE_PROJECT_ID` | Unset | Optional cloud browser project; inferred from API key if unset |
+| `TWILIO_ACCOUNT_SID` | Unset | Twilio account owning the SMS number; enables texting with token and SMS sender |
+| `TWILIO_AUTH_TOKEN` | Unset | Twilio account authentication for SMS and the optional call relay |
+| `TWILIO_FROM_NUMBER_TXT` | Unset | Dedicated SMS sender in E.164 format; separate from the calling number |
+| `SMS_CONTACTS` | `CALL_CONTACTS` | Optional JSON name-to-number map for texting |
 
-The client uses the GPT-Live WebSocket protocol with Responses delegation. `--calls` registers `call_contact`. Enabling capture registers `capture_snapshot`; `--shopify` adds catalog search, product details, and merchant checkout handoff. A configured Browserbase key adds web search, static page reading, and rendered browser navigation. Arbitrary browser actions and merchant inventory actions are not implemented. Voice sessions and delegated inference incur separate charges.
+The client uses the GPT-Live WebSocket protocol with Responses delegation. Configured calling adds `call_contact` automatically (disable with `--no-calls`); configured Twilio SMS adds `send_text` and `read_texts` automatically (disable with `--no-sms`). Enabling capture registers `capture_snapshot`; `--shopify` adds catalog search, product details, and merchant checkout handoff. A configured Browserbase key adds web search, static page reading, and rendered browser navigation. Arbitrary browser actions and merchant inventory actions are not implemented. Voice sessions and delegated inference incur separate charges.
 
 ## Documentation
 

@@ -17,6 +17,10 @@ class Settings:
     openai_api_key: str = field(default="", repr=False)
     browserbase_api_key: str = field(default="", repr=False)
     browserbase_project_id: str = field(default="", repr=False)
+    composio_api_key: str = field(default="", repr=False)
+    composio_user_id: str = field(default="", repr=False)
+    composio_accounts: dict[str, str] = field(default_factory=dict, repr=False)
+    timezone: str = "America/Toronto"
     live_model: str = "gpt-live-1"
     live_voice: str = "marin"
     backend_model: str = "gpt-5.6-luna"
@@ -36,6 +40,14 @@ def load_settings(env_file: Path = Path(".env")) -> Settings:
         openai_api_key=value("OPENAI_API_KEY"),
         browserbase_api_key=value("BROWSERBASE_API_KEY"),
         browserbase_project_id=value("BROWSERBASE_PROJECT_ID"),
+        composio_api_key=value("COMPOSIO_API_KEY"),
+        composio_user_id=value("COMPOSIO_USER_ID"),
+        composio_accounts={
+            app: account
+            for app in ("gmail", "googlecalendar")
+            if (account := value(f"COMPOSIO_{app.upper()}_ACCOUNT_ID"))
+        },
+        timezone=value("COMBADGE_TIMEZONE") or "America/Toronto",
         live_model=value("OPENAI_LIVE_MODEL") or "gpt-live-1",
         live_voice=value("OPENAI_LIVE_VOICE") or "marin",
         backend_model=value("OPENAI_BACKEND_MODEL") or "gpt-5.6-luna",

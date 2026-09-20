@@ -7,7 +7,9 @@ from dataclasses import dataclass
 
 from commbadge.browserbase import WEB_TOOL_NAMES, BrowserbaseClient
 from commbadge.capture import SnapshotCapture
+from commbadge.composio import COMPOSIO_TOOL_NAMES, ComposioClient
 from commbadge.shopify import ShoppingSession
+from commbadge.sms import SMS_TOOL_NAMES, SmsClient
 from commbadge.vision import ImageBudget
 from commbadge.web_lookup import WebLookup
 
@@ -49,15 +51,21 @@ class SnapshotDelegation:
         *,
         shopping: ShoppingSession | None = None,
         web: BrowserbaseClient | None = None,
+        composio: ComposioClient | None = None,
+        sms: SmsClient | None = None,
         call_handler=None,
         on_tools_submitted: Callable[[], None] | None = None,
+        on_tool_result: Callable[[str, str, dict], None] | None = None,
     ):
         self.call_handler = call_handler
         self.on_tools_submitted = on_tools_submitted
+        self.on_tool_result = on_tool_result
         self.connection = connection
         self.capture = capture
         self.shopping = shopping
         self.web = web
+        self.composio = composio
+        self.sms = sms
         self.web_lookup = WebLookup(web, report) if web is not None else None
         self.image_budget = ImageBudget()
         self.report = report
@@ -126,6 +134,10 @@ class SnapshotDelegation:
                         result = {"status": "captured", "image_id": call.call_id}
                     elif call.name in WEB_TOOL_NAMES and self.web_lookup is not None:
                         result = await self.web_lookup.execute(call.name, args, call.delegation_id)
+                    elif call.name in COMPOSIO_TOOL_NAMES and self.composio is not None:
+                        result = await self.composio.execute(call.name, args, call.delegation_id)
+                    elif call.name in SMS_TOOL_NAMES and self.sms is not None:
+                        result = await self.sms.execute(call.name, args, call.delegation_id)
                     elif self.shopping is not None:
                         handlers = {
                             "search_shopify": (
@@ -163,6 +175,8 @@ class SnapshotDelegation:
                 except (OSError, RuntimeError, ValueError) as error:
                     result = {"status": "failed", "error": str(error)}
                     self.report("\nTool failed; reporting the error to the assistant.\n")
+                if self.on_tool_result is not None:
+                    self.on_tool_result(call.name, call.arguments, result)
                 await self.connection.send(
                     {
                         "type": "response.item.create",
